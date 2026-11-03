@@ -12,7 +12,7 @@ Companion to [`kaikisegfault/one-voice`](https://github.com/kaikisegfault/one-vo
 | `Ctrl+Shift+2` | **Grammar** | The whole answer of your `@grammar` GPT, as its Copy button gives it. |
 
 - Press either key to start; the key you **stop** with decides the mode. So you can start talking and decide at the end.
-- Grammar: after you stop, the extension types `@grammar` in ChatGPT, picks the GPT listed under **Custom GPTs** (not Plugins), adds your words, sends, waits for the answer and presses the answer's Copy button (the one next to 👍 👎, never the one next to Edit on your message). The raw text is copied first, so if anything fails you still have your dictation.
+- Grammar: after you stop, the extension types `@grammar` in ChatGPT, picks the GPT listed under **Custom GPTs** (not Plugins), adds your words, sends, waits until the new answer is complete and presses the Copy of the last answer in the chat (the one next to 👍 👎, never the one next to Edit on your message). The raw text is copied first, so if anything fails you still have your dictation.
 - Pressing a key while it's waiting for the answer cancels.
 - A notification shows the recording time, then **✓ Copied** when the clipboard is ready. It's visible over every window, so you can minimize ChatGPT right after the stop press. Clicking it brings ChatGPT forward.
 - Every press brings the ChatGPT app window into view: restored if minimized, raised if behind. Its size and position stay; nothing minimizes it. If it's closed, a notification asks you to open it (Chrome lets only Web Store extensions launch an installed app), so keep it open or minimized.

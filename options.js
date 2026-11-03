@@ -65,20 +65,20 @@ async function save() {
 }
 
 async function showIssue() {
-  const { lastIssue } = await chrome.storage.local.get('lastIssue');
-  $('issueButtons').hidden = !lastIssue;
+  const { lastIssue, lastRun } = await chrome.storage.local.get(['lastIssue', 'lastRun']);
+  $('issueButtons').hidden = !lastIssue && !lastRun;
   $('issueText').textContent = lastIssue
     ? `${new Date(lastIssue.at).toLocaleString()}: ${lastIssue.msg}`
     : 'None so far.';
 }
 
 $('copyIssue').addEventListener('click', async () => {
-  const { lastIssue } = await chrome.storage.local.get('lastIssue');
-  await navigator.clipboard.writeText(JSON.stringify(lastIssue, null, 1));
+  const { lastIssue, lastRun } = await chrome.storage.local.get(['lastIssue', 'lastRun']);
+  await navigator.clipboard.writeText(JSON.stringify({ lastIssue, lastRun }, null, 1));
   $('copyIssue').textContent = 'Copied';
 });
 $('clearIssue').addEventListener('click', async () => {
-  await chrome.storage.local.remove('lastIssue');
+  await chrome.storage.local.remove(['lastIssue', 'lastRun']);
   showIssue();
 });
 $('save').addEventListener('click', save);

@@ -267,7 +267,6 @@
   // ---------- The reply (found by position and text; ChatGPT's markup has no stable attributes) ----------
 
   const norm = (t) => (t || '').replace(/\s+/g, ' ').trim();
-  const follows = (a, b) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 
   // Text as shown, with list numbers kept, without buttons, icons or screen-reader-only labels.
   function blockText(root) {
@@ -297,20 +296,6 @@
     return out.join('').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   }
 
-  // Elements outside the composer whose own text contains `head`.
-  function textMatches(head) {
-    const composer = findComposer();
-    const out = [];
-    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    let n;
-    while ((n = w.nextNode())) {
-      if (!norm(n.nodeValue).includes(head)) continue;
-      const el = n.parentElement;
-      if (el && visible(el) && !(composer && composer.contains(el))) out.push(el);
-    }
-    return out;
-  }
-
   // A message's own Copy button (not "Copy code" inside a code block).
   function copyButtons() {
     return Array.from(document.querySelectorAll('button')).filter(b => {
@@ -338,19 +323,31 @@
     return null;
   }
 
-  // The answer's Copy button, after your message. It only appears once the answer is complete.
-  // Your own message's Copy (next to Edit) is never taken.
-  function replyCopyButton(userEl) {
-    const list = copyButtons().filter(b => follows(userEl, b)).map(btn => {
+  // Copy buttons of answers, in page order: rows with 👍/👎-type buttons, never your message's row (Copy + Edit).
+  function answerRows() {
+    const rows = copyButtons().map(btn => {
       const row = actionRow(btn);
-      const labels = row ? Array.from(row.querySelectorAll('button'), buttonIdentifiers).join(' ') : '';
-      return { btn, labels, turn: turnOf(btn) };
-    }).filter(c => !/\bedit\b/.test(c.labels) && c.turn && !c.turn.contains(userEl));
-    for (let i = list.length - 1; i >= 0; i--) {
-      if (ANSWER_ACTIONS.test(list[i].labels)) return list[i];
-    }
-    // Unknown labels: two Copy buttons after your message means yours and the answer's; take the last.
-    return copyButtons().filter(b => follows(userEl, b)).length >= 2 && list.length ? list[list.length - 1] : null;
+      const buttons = row ? Array.from(row.querySelectorAll('button')) : [];
+      return {
+        btn,
+        turn: turnOf(btn),
+        labels: buttons.map(buttonIdentifiers).join(' '),
+        names: buttons.map(b => b.getAttribute('aria-label') || '?').join(', ')
+      };
+    }).filter(c => c.turn && !/\bedit\b/.test(c.labels));
+    const answers = rows.filter(c => ANSWER_ACTIONS.test(c.labels));
+    return answers.length ? answers : rows;
+  }
+
+  // While an answer is being written, the send button turns into a stop button.
+  function streaming() {
+    return Array.from(composerScope().querySelectorAll('button'))
+      .some(b => visible(b) && /\bstop\b/.test(buttonIdentifiers(b)));
+  }
+
+  function answerSnapshot() {
+    const rows = answerRows();
+    return { count: rows.length, lastText: rows.length ? blockText(rows[rows.length - 1].turn) : null };
   }
 
   // ChatGPT's own Copy writes through page-hook.js, which reports the text here. It's taken only
@@ -425,18 +422,23 @@
     }
   }
 
-  async function waitForReply(userEl, run) {
+  // The last answer in the chat, once a new one is complete (more answers than before, or a different
+  // last answer) and has stopped changing.
+  async function waitForReply(before, run) {
     const end = Date.now() + 180000;
-    let last = null;
+    let lastText = null;
     while (Date.now() < end) {
       await sleep(300);
       check(run);
-      const found = replyCopyButton(userEl);
-      const text = found ? blockText(found.turn) : null;
-      if (found && text && text === last) return found;
-      last = text;
+      const rows = answerRows();
+      const last = rows[rows.length - 1];
+      if (!last) continue;
+      const text = blockText(last.turn);
+      const isNew = rows.length > before.count || text !== before.lastText;
+      if (isNew && text && text === lastText && !streaming()) return { ...last, count: rows.length };
+      lastText = isNew ? text : null;
     }
-    throw fail('no GPT answer within 3 min', describeButtons(document));
+    throw fail('no new GPT answer within 3 min', describeButtons(document));
   }
 
   // Exactly what ChatGPT's Copy button copies; the answer's visible text if that can't be caught.
@@ -449,6 +451,11 @@
     } finally {
       catcher = null;
     }
+    // What was pressed, for Copy details (button names and counts only, never text).
+    try {
+      chrome.storage.local.set({ lastRun: { at: Date.now(), answersBefore: found.before, answersAfter: found.count,
+        pressedRow: found.names, copyCaught: !!(caught && caught.trim()) } });
+    } catch (e) {}
     if (caught && caught.trim()) return unescapeMarkdown(caught.trim());
     const md = found.turn.querySelector('.markdown');
     console.log(LOG, 'Copy button text not caught, using the visible answer');
@@ -465,14 +472,15 @@
     const sendBtn = await waitFor(() => { const b = findSend(); return b && !b.disabled ? b : null; }, 3000, 100, run);
     if (!sendBtn) throw fail('send button not ready', describeButtons(composerScope()));
     const head = norm(text).slice(0, 40);
-    const before = new Set(textMatches(head));
+    const before = answerSnapshot();
     send('progress', { step: 'answer' });
     await realisticClick(sendBtn);
-    // Your message: the first new element showing your words (a corrected copy in the answer comes later).
-    const userEl = await waitFor(() => textMatches(head).find(el => !before.has(el)), 8000, 100, run);
-    if (!userEl) throw fail('message was not sent', describeButtons(composerScope()));
-    const found = await waitForReply(userEl, run);
-    return copyReply(found, run);
+    // Sent: ChatGPT empties the input.
+    if (!(await waitFor(() => !norm(composerText()).includes(head), 8000, 100, run))) {
+      throw fail('message was not sent', describeButtons(composerScope()));
+    }
+    const found = await waitForReply(before, run);
+    return copyReply({ ...found, before: before.count }, run);
   }
 
   // ---------- Recording ----------
