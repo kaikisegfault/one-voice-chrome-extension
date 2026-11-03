@@ -54,12 +54,12 @@
   ];
   const SEND_SELECTORS = [
     'button[data-testid="send-button"]',
+    'form button[aria-label="Send" i]',
+    'button[aria-label="Send" i]',
     'button[aria-label*="end message" i]',
     'button[aria-label*="end prompt" i]',
     'form button[type="submit"]'
   ];
-  const STOP_STREAMING = 'button[data-testid="stop-button"], button[aria-label*="stop streaming" i], button[aria-label*="stop generating" i]';
-  const COPY_BUTTON = 'button[data-testid="copy-turn-action-button"], button[aria-label="Copy" i]';
 
   const visible = (el) => !!el && el.isConnected && el.getClientRects().length > 0;
 
@@ -263,96 +263,87 @@
     document.execCommand('insertText', false, text);
   }
 
-  // ---------- Chat messages ----------
+  // ---------- The reply (found by position and text; ChatGPT's markup has no stable attributes) ----------
 
-  const messageKey = (el) => el.getAttribute('data-message-id') || el;
+  const norm = (t) => (t || '').replace(/\s+/g, ' ').trim();
+  const follows = (a, b) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 
-  function snapshot(role) {
-    return new Set(Array.from(document.querySelectorAll(`[data-message-author-role="${role}"]`), messageKey));
-  }
-
-  function newest(role, seen) {
-    const list = document.querySelectorAll(`[data-message-author-role="${role}"]`);
-    for (let i = list.length - 1; i >= 0; i--) {
-      if (!seen.has(messageKey(list[i]))) return list[i];
-    }
-    return null;
-  }
-
-  function replyBody(msg) {
-    const mds = msg.querySelectorAll('.markdown');
-    return mds.length ? mds[mds.length - 1] : msg;
-  }
-
-  // ---------- Reading answer 1 / 2 out of the reply ----------
-
-  // "1)", "1.", "1:", "(1)", "[1]", "#1", "1 -", "1️⃣", "Option 1:", "Version 2 —", optional "## " / "**".
-  const NUM_RE = /^\s*(?:#{1,6}\s+)?[*_]*\s*(?:(?:option|version|variant|answer|alternative)\s*)?[(\[]?\s*#?\s*([1-9])\s*(?:️?⃣|[)\]:]|\.(?!\d)|\s[-–—])[*_]*\s*(?:[-–—:]\s*)?(.*)$/i;
-  // "Grammar: …", "**Corrected version** — …", or a heading line "Fluent alternative".
-  const LABEL_RE = /^\s*(?:#{1,6}\s+)?[*_]*\s*([a-z][a-z ]{1,38}[a-z])\s*[*_]*\s*(?:(?::|\s[-–—])\s*[*_]*\s*(.*)|$)/i;
-  const LABELS = [
-    [1, /^(?:grammar(?: check(?:ed)?| fix(?:ed)?| correct(?:ed|ion)?)?|grammatical(?:ly correct(?:ed)?)?(?: version)?|correct(?:ed|ion)?(?: version| text| sentence)?|proofread(?: version)?|fixed(?: version)?)$/],
-    [2, /^(?:(?:more )?fluent(?: alternative| version| rewrite)?|natural(?: version| alternative)?|alternative(?: version)?|rewrite|rewritten(?: version)?|rephrased(?: version)?|polished(?: version)?|improved(?: version)?)$/]
-  ];
-  const QUOTES = { '"': '"', '“': '”', '„': '“', "'": "'", '‘': '’', '«': '»' };
-
-  function labelOf(line) {
-    const m = line.match(LABEL_RE);
-    if (!m) return null;
-    const name = m[1].toLowerCase().replace(/\s+/g, ' ');
-    for (const [n, re] of LABELS) if (re.test(name)) return { n, rest: (m[2] || '').trim() };
-    return null;
-  }
-
-  function clean(s) {
-    let t = (s || '').trim();
-    const firstLine = t.split('\n')[0];
-    const l = labelOf(firstLine);
-    if (l) t = (l.rest + t.slice(firstLine.length)).trim();
-    t = t.replace(/^[*_]+|[*_]+$/g, '').trim();
-    const close = QUOTES[t[0]];
-    if (close && t.length > 1 && t[t.length - 1] === close) t = t.slice(1, -1).trim();
-    return t;
-  }
-
-  // Answers by number: {1: '…', 2: '…'}.
-  function parseAnswers(body) {
-    const found = {};
-    // Markdown "1." becomes an <ol>, and the numbers are then not part of the text.
-    for (const ol of body.querySelectorAll('ol')) {
-      if (ol.parentElement && ol.parentElement.closest('li')) continue;
-      const start = parseInt(ol.getAttribute('start') || '1', 10) || 1;
-      ol.querySelectorAll(':scope > li').forEach((li, i) => {
-        if (!((start + i) in found)) found[start + i] = li.innerText;
-      });
-    }
-    if (!(found[1] && found[2])) {
-      // Numbered or labelled lines; "… end. 2) …" on one line is split first.
-      const text = (body.innerText || '').replace(
-        /([.!?]["”'’)]?)[ \t]+(?=[(\[]?#?[2-9](?:️?⃣|[)\]:]|\.(?!\d))\s)/g, '$1\n');
-      const seg = {};
-      let cur = null;
-      for (const line of text.split('\n')) {
-        const m = line.match(NUM_RE);
-        const hit = m ? { n: +m[1], rest: m[2] } : labelOf(line);
-        if (hit && !(hit.n in seg)) { cur = hit.n; seg[cur] = hit.rest; continue; }
-        if (cur && line.trim()) seg[cur] += '\n' + line.trim();
+  // Text as shown, with list numbers kept, without buttons, icons or screen-reader-only labels.
+  function blockText(root) {
+    const out = [];
+    const walk = (node) => {
+      if (node.nodeType === 3) { out.push(node.nodeValue); return; }
+      if (node.nodeType !== 1) return;
+      const tag = node.tagName.toUpperCase();
+      if (tag === 'BUTTON' || tag === 'SVG' || tag === 'STYLE' || tag === 'SCRIPT') return;
+      if (node.getAttribute('aria-hidden') === 'true' || /\bsr-only\b/.test(node.getAttribute('class') || '')) return;
+      if (tag === 'BR') { out.push('\n'); return; }
+      const block = /^(P|DIV|LI|H[1-6]|PRE|BLOCKQUOTE|TR|UL|OL|TABLE|SECTION|ARTICLE)$/.test(tag);
+      if (block) out.push('\n');
+      if (tag === 'LI') {
+        const list = node.parentElement;
+        if (list && list.tagName.toUpperCase() === 'OL') {
+          const start = parseInt(list.getAttribute('start') || '1', 10) || 1;
+          out.push(`${start + Array.from(list.children).indexOf(node)}. `);
+        } else {
+          out.push('- ');
+        }
       }
-      for (const n in seg) if (!(n in found)) found[n] = seg[n];
-    }
-    if (!Object.keys(found).length) {
-      // No numbers or labels at all: exactly two paragraphs are taken in order.
-      const blocks = Array.from(body.children).map(el => el.innerText.trim()).filter(Boolean);
-      if (blocks.length === 2) { found[1] = blocks[0]; found[2] = blocks[1]; }
-    }
-    for (const n in found) found[n] = clean(found[n]);
-    return found;
+      for (const c of node.childNodes) walk(c);
+      if (block) out.push('\n');
+    };
+    walk(root);
+    return out.join('').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   }
 
-  // Answer n of the reply; '' if it can't be told apart.
-  function pickVersion(body, n) {
-    return parseAnswers(body)[n] || '';
+  // Elements outside the composer whose own text contains `head`.
+  function textMatches(head) {
+    const composer = findComposer();
+    const out = [];
+    const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = w.nextNode())) {
+      if (!norm(n.nodeValue).includes(head)) continue;
+      const el = n.parentElement;
+      if (el && visible(el) && !(composer && composer.contains(el))) out.push(el);
+    }
+    return out;
   }
+
+  // A message's own Copy button (not "Copy code" inside a code block).
+  function copyButtons() {
+    return Array.from(document.querySelectorAll('button')).filter(b => {
+      const id = buttonIdentifiers(b);
+      return visible(b) && id.includes('copy') && !id.includes('code') && !id.includes('link');
+    });
+  }
+
+  // Smallest ancestor of a button that holds some text: its message.
+  function turnOf(btn) {
+    for (let a = btn.parentElement; a && a !== document.body; a = a.parentElement) {
+      if (blockText(a)) return a;
+    }
+    return null;
+  }
+
+  // The answer's Copy button: after your message, not part of it. It appears when the answer is complete.
+  function replyCopyButton(userEl) {
+    const list = copyButtons().filter(b => follows(userEl, b));
+    for (let i = list.length - 1; i >= 0; i--) {
+      const turn = turnOf(list[i]);
+      if (turn && !turn.contains(userEl)) return { btn: list[i], turn };
+    }
+    return null;
+  }
+
+  // ChatGPT's own Copy writes through page-hook.js, which reports the exact text here.
+  const pageCopies = [];
+  window.addEventListener('message', (e) => {
+    if (e.source === window && e.data && e.data.__oneVoice === 'copied' && typeof e.data.text === 'string') {
+      pageCopies.push({ at: Date.now(), text: e.data.text });
+      if (pageCopies.length > 5) pageCopies.shift();
+    }
+  });
 
   // ---------- The @grammar GPT ----------
 
@@ -414,45 +405,48 @@
     }
   }
 
-  async function waitForReply(seen, run) {
+  async function waitForReply(userEl, run) {
     const end = Date.now() + 180000;
-    let last = '';
-    let stable = 0;
+    let last = null;
     while (Date.now() < end) {
       await sleep(300);
       check(run);
-      const msg = newest('assistant', seen);
-      if (!msg) continue;
-      const body = replyBody(msg);
-      const text = (body.innerText || '').trim();
-      if (!text || text !== last || visible(document.querySelector(STOP_STREAMING))) {
-        last = text;
-        stable = 0;
-        continue;
-      }
-      stable++;
-      const turn = msg.closest('article') || msg.parentElement;
-      if ((turn && turn.querySelector(COPY_BUTTON)) || stable >= 4) return body;
+      const found = replyCopyButton(userEl);
+      const text = found ? blockText(found.turn) : null;
+      if (found && text && text === last) return found;
+      last = text;
     }
-    throw new Error('no GPT answer within 3 min');
+    throw fail('no GPT answer within 3 min', describeButtons(document));
+  }
+
+  // Exactly what ChatGPT's Copy button copies; the answer's visible text if that can't be caught.
+  async function copyReply(found, run) {
+    const clickedAt = Date.now();
+    await realisticClick(found.btn);
+    const caught = await waitFor(() => pageCopies.find(c => c.at >= clickedAt), 1500, 50, run);
+    if (caught && caught.text.trim()) return caught.text.trim();
+    const md = found.turn.querySelector('.markdown');
+    console.log(LOG, 'Copy button text not caught, using the visible answer');
+    return blockText(md || found.turn);
   }
 
   async function askGPT(text, run) {
     const composer = findComposer();
-    if (!composer) throw new Error('composer not found');
+    if (!composer) throw fail('composer not found', describeButtons(document));
     await selectMention(composer, run);
     const cur = composerText();
     typeText(findComposer() || composer, (cur.trim() && !/\s$/.test(cur) ? ' ' : '') + text);
 
     const sendBtn = await waitFor(() => { const b = findSend(); return b && !b.disabled ? b : null; }, 3000, 100, run);
     if (!sendBtn) throw fail('send button not ready', describeButtons(composerScope()));
-    const seenUser = snapshot('user');
-    const seenBot = snapshot('assistant');
+    const head = norm(text).slice(0, 40);
+    const before = new Set(textMatches(head));
     await realisticClick(sendBtn);
-    if (!(await waitFor(() => newest('user', seenUser), 5000, 100, run))) {
-      throw fail('message was not sent', describeButtons(composerScope()));
-    }
-    return waitForReply(seenBot, run);
+    // Your message: the first new element showing your words (a corrected copy in the answer comes later).
+    const userEl = await waitFor(() => textMatches(head).find(el => !before.has(el)), 8000, 100, run);
+    if (!userEl) throw fail('message was not sent', describeButtons(composerScope()));
+    const found = await waitForReply(userEl, run);
+    return copyReply(found, run);
   }
 
   // ---------- Recording ----------
@@ -538,14 +532,8 @@
         const composer = findComposer();
         if (copied && composer) clearComposer(composer);
       } else {
-        const body = await askGPT(text, run);
-        const n = mode === 'grammar' ? 1 : 2;
-        let result = pickVersion(body, n);
-        if (!result) {
-          report(`answer ${n} not found, copied the whole reply`, body.outerHTML.slice(0, 6000));
-          result = (body.innerText || '').trim();
-        }
-        if (result) await copy(result);
+        const answer = await askGPT(text, run);
+        if (answer) await copy(answer);
       }
       finish(run);
     } catch (e) {

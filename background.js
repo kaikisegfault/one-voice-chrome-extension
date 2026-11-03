@@ -1,6 +1,6 @@
 const CHATGPT_URL_RE = /^https:\/\/(chatgpt\.com|chat\.openai\.com)\//;
 const MEDIA_URL_PATTERNS = ['*://*.youtube.com/*', '*://*.spotify.com/*'];
-const MODE_BY_COMMAND = { '1-plain': 'plain', '2-grammar': 'grammar', '3-fluent': 'fluent' };
+const MODE_BY_COMMAND = { '1-plain': 'plain', '2-grammar': 'grammar' };
 const DEFAULTS = { maxDuration: 600, pauseMedia: false, mention: '@grammar' };
 const PAUSED_IDS_KEY = 'pausedTabIds';
 const SAFETY_RESUME_MS = 15 * 60 * 1000;
@@ -68,6 +68,7 @@ async function ask(tabId, msg, waitMs = 0) {
       if (res) return res;
     } catch (e) {}
     try {
+      await chrome.scripting.executeScript({ target: { tabId }, files: ['page-hook.js'], world: 'MAIN' });
       await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
       const res = await chrome.tabs.sendMessage(tabId, msg);
       if (res) return res;

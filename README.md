@@ -4,23 +4,22 @@ Global-hotkey voice-to-text through ChatGPT's own browser dictation. Press a hot
 
 Companion to [`kaikisegfault/one-voice`](https://github.com/kaikisegfault/one-voice) (the VS Code / Whisper-API edition).
 
-## Three modes
+## Two modes
 
 | Default key | Mode | Clipboard gets |
 |---|---|---|
 | `Ctrl+Shift+1` | **Plain** | Your words exactly as ChatGPT transcribed them. Nothing is sent. |
-| `Ctrl+Shift+2` | **Grammar** | Answer **1)** of your `@grammar` GPT — the corrected text. |
-| `Ctrl+Shift+3` | **Fluent** | Answer **2)** of your `@grammar` GPT — the fluent rewrite. |
+| `Ctrl+Shift+2` | **Grammar** | The whole answer of your `@grammar` GPT, as its Copy button gives it. |
 
-- Press any mode key to start; the key you **stop** with decides the mode. So you can start talking and decide at the end.
-- Grammar / Fluent: after you stop, the extension types `@grammar` in ChatGPT, picks the GPT listed under **Custom GPTs** (not Plugins), adds your words, sends, waits for the answer, and copies the part you asked for. The raw text is copied first, so if anything fails you still have your dictation.
+- Press either key to start; the key you **stop** with decides the mode. So you can start talking and decide at the end.
+- Grammar: after you stop, the extension types `@grammar` in ChatGPT, picks the GPT listed under **Custom GPTs** (not Plugins), adds your words, sends, waits for the answer and presses its Copy button. The raw text is copied first, so if anything fails you still have your dictation.
 - Pressing a key while it's waiting for the answer cancels.
 - Every press brings the ChatGPT window into view: restored if minimized, raised if behind, reopened where it last was if closed. Its size and position stay; nothing minimizes it.
 - In the recording bar `✕ ~~~ ■ ↑` the stop press clicks **■** (text into the input, nothing sent yet), never ✕ or ↑.
 - The keys work while any Chrome window has focus: browser tabs, the ChatGPT app window, other installed web apps. ChromeOS doesn't offer **Global** extension shortcuts (Chrome hides that scope and ignores it there), so Linux apps such as VS Code can't trigger them. From a Linux app: pin ChatGPT to the shelf and press `Alt+<its shelf position>` to bring it forward, then the mode key.
 - Change keys at `chrome://extensions/shortcuts`.
 
-The GPT gives two versions, corrected first and fluent second — e.g. [Grammar Check + Fluent Alternative](https://chatgpt.com/g/g-aizdZTwve-grammar-check-fluent-alternative). Any common shape is understood: `1)` `1.` `1:` `(1)` `[1]` `#1` `1 -` `1️⃣` `Option 1:` / `Version 1:`, a markdown list, labels like `Grammar:` / `Corrected:` / `Fluent alternative:` (also as headings), both on one line, or just two paragraphs. Wrapping quotes and labels are stripped. If the two can't be told apart, the whole answer is copied.
+The GPT used: [Grammar Check + Fluent Alternative](https://chatgpt.com/g/g-aizdZTwve-grammar-check-fluent-alternative). The answer reaches the clipboard even if you click into another window while it's being written.
 
 ## Install (unpacked)
 
@@ -50,7 +49,7 @@ Microphone choice is Chrome's default input: ChromeOS Settings → Device → Au
 
 Extension icon → popup:
 
-- **GPT to mention** *(default `@grammar`)* — what Grammar / Fluent type in ChatGPT.
+- **GPT to mention** *(default `@grammar`)* — what Grammar types in ChatGPT.
 - **Max recording duration** *(default 600 s, 10–3600)* — auto-stops at this limit, in the mode you started with.
 - **Pause YouTube / Spotify during recording** *(default off)* — pauses playing YouTube, YouTube Music and Spotify web tabs on start, resumes on the stop press. Asks for access to those two sites only. Can't reach native Android apps or Bluetooth audio.
 - **Last problem** — when a step fails, the popup shows what went wrong; **Copy details** copies the buttons / HTML it saw, which is what's needed to fix a matcher.
@@ -72,7 +71,7 @@ Start with **Last problem** in the extension popup. The same lines appear in Dev
 
 - Makes no network requests of its own; your audio goes to OpenAI exactly as when you click the mic yourself.
 - Host access: `chatgpt.com` and `chat.openai.com` only, plus `*.youtube.com` / `*.spotify.com` only if you switch on media pausing (switching it off removes them).
-- Permissions: `storage` (settings), `scripting` + `tabs` (find, open and raise the ChatGPT window), `alarms` (media safety-resume), `offscreen` + `clipboardWrite` (copy even when the ChatGPT window has no focus).
+- Permissions: `storage` (settings), `scripting` + `tabs` (find, open and raise the ChatGPT window), `alarms` (media safety-resume), `offscreen` + `clipboardWrite` (copy even when the ChatGPT window has no focus). A small page script (`page-hook.js`) only reports the text ChatGPT's Copy button writes.
 
 ## License
 
