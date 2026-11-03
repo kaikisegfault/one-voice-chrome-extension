@@ -17,7 +17,7 @@ Companion to [`kaikisegfault/one-voice`](https://github.com/kaikisegfault/one-vo
 - Pressing a key while it's waiting for the answer cancels.
 - Change keys at `chrome://extensions/shortcuts`; keep the scope **Global** so they work from any window, Linux apps included.
 
-The GPT must answer in the shape `1) corrected … 2) fluent …` — e.g. [Grammar Check + Fluent Alternative](https://chatgpt.com/g/g-aizdZTwve-grammar-check-fluent-alternative). If the answer isn't shaped like that, the whole answer is copied.
+The GPT gives two versions, corrected first and fluent second — e.g. [Grammar Check + Fluent Alternative](https://chatgpt.com/g/g-aizdZTwve-grammar-check-fluent-alternative). Any common shape is understood: `1)` `1.` `1:` `(1)` `[1]` `#1` `1 -` `1️⃣` `Option 1:` / `Version 1:`, a markdown list, labels like `Grammar:` / `Corrected:` / `Fluent alternative:` (also as headings), both on one line, or just two paragraphs. Wrapping quotes and labels are stripped. If the two can't be told apart, the whole answer is copied.
 
 ## Install (unpacked)
 
@@ -30,8 +30,8 @@ The GPT must answer in the shape `1) corrected … 2) fluent …` — e.g. [Gram
 
 Chrome drops an unpacked extension loaded from **Linux files** on every restart, because the Linux container isn't running yet when Chrome starts. Load it from **My files** instead:
 
-1. Files app → right-click **Downloads** → **Share with Linux** (once).
-2. In the repo: `./sync-to-chromeos.sh` — copies the extension to **My files › Downloads › one-voice-chrome-extension**.
+1. Files app → create **My files › shared-with-linux** → right-click it → **Share with Linux** (once).
+2. In the repo: `./sync-to-chromeos.sh` — copies the extension to **My files › shared-with-linux › one-voice-chrome-extension**.
 3. **Load unpacked** that folder. After each update, run the script again and press ⟳ on the extension.
 
 ## First run

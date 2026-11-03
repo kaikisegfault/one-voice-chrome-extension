@@ -235,19 +235,74 @@
     return mds.length ? mds[mds.length - 1] : msg;
   }
 
-  // Answer n of a "1) … 2) …" reply; '' if the reply isn't shaped like that.
-  function pickVersion(body, n) {
-    const ol = body.querySelector('ol');
-    const items = ol ? ol.querySelectorAll(':scope > li') : [];
-    if (items.length >= 2) return (items[n - 1]?.innerText || '').trim();
-    const parts = {};
-    let cur = null;
-    for (const line of (body.innerText || '').split('\n')) {
-      const m = line.match(/^\s*(?:\*\*)?(\d)\s*[).:](?:\*\*)?\s*(.*)$/);
-      if (m && !(m[1] in parts)) { cur = m[1]; parts[cur] = m[2]; continue; }
-      if (cur && line.trim()) parts[cur] += '\n' + line.trim();
+  // ---------- Reading answer 1 / 2 out of the reply ----------
+
+  // "1)", "1.", "1:", "(1)", "[1]", "#1", "1 -", "1️⃣", "Option 1:", "Version 2 —", optional "## " / "**".
+  const NUM_RE = /^\s*(?:#{1,6}\s+)?[*_]*\s*(?:(?:option|version|variant|answer|alternative)\s*)?[(\[]?\s*#?\s*([1-9])\s*(?:️?⃣|[)\]:]|\.(?!\d)|\s[-–—])[*_]*\s*(?:[-–—:]\s*)?(.*)$/i;
+  // "Grammar: …", "**Corrected version** — …", or a heading line "Fluent alternative".
+  const LABEL_RE = /^\s*(?:#{1,6}\s+)?[*_]*\s*([a-z][a-z ]{1,38}[a-z])\s*[*_]*\s*(?:(?::|\s[-–—])\s*[*_]*\s*(.*)|$)/i;
+  const LABELS = [
+    [1, /^(?:grammar(?: check(?:ed)?| fix(?:ed)?| correct(?:ed|ion)?)?|grammatical(?:ly correct(?:ed)?)?(?: version)?|correct(?:ed|ion)?(?: version| text| sentence)?|proofread(?: version)?|fixed(?: version)?)$/],
+    [2, /^(?:(?:more )?fluent(?: alternative| version| rewrite)?|natural(?: version| alternative)?|alternative(?: version)?|rewrite|rewritten(?: version)?|rephrased(?: version)?|polished(?: version)?|improved(?: version)?)$/]
+  ];
+  const QUOTES = { '"': '"', '“': '”', '„': '“', "'": "'", '‘': '’', '«': '»' };
+
+  function labelOf(line) {
+    const m = line.match(LABEL_RE);
+    if (!m) return null;
+    const name = m[1].toLowerCase().replace(/\s+/g, ' ');
+    for (const [n, re] of LABELS) if (re.test(name)) return { n, rest: (m[2] || '').trim() };
+    return null;
+  }
+
+  function clean(s) {
+    let t = (s || '').trim();
+    const firstLine = t.split('\n')[0];
+    const l = labelOf(firstLine);
+    if (l) t = (l.rest + t.slice(firstLine.length)).trim();
+    t = t.replace(/^[*_]+|[*_]+$/g, '').trim();
+    const close = QUOTES[t[0]];
+    if (close && t.length > 1 && t[t.length - 1] === close) t = t.slice(1, -1).trim();
+    return t;
+  }
+
+  // Answers by number: {1: '…', 2: '…'}.
+  function parseAnswers(body) {
+    const found = {};
+    // Markdown "1." becomes an <ol>, and the numbers are then not part of the text.
+    for (const ol of body.querySelectorAll('ol')) {
+      if (ol.parentElement && ol.parentElement.closest('li')) continue;
+      const start = parseInt(ol.getAttribute('start') || '1', 10) || 1;
+      ol.querySelectorAll(':scope > li').forEach((li, i) => {
+        if (!((start + i) in found)) found[start + i] = li.innerText;
+      });
     }
-    return (parts[n] || '').trim();
+    if (!(found[1] && found[2])) {
+      // Numbered or labelled lines; "… end. 2) …" on one line is split first.
+      const text = (body.innerText || '').replace(
+        /([.!?]["”'’)]?)[ \t]+(?=[(\[]?#?[2-9](?:️?⃣|[)\]:]|\.(?!\d))\s)/g, '$1\n');
+      const seg = {};
+      let cur = null;
+      for (const line of text.split('\n')) {
+        const m = line.match(NUM_RE);
+        const hit = m ? { n: +m[1], rest: m[2] } : labelOf(line);
+        if (hit && !(hit.n in seg)) { cur = hit.n; seg[cur] = hit.rest; continue; }
+        if (cur && line.trim()) seg[cur] += '\n' + line.trim();
+      }
+      for (const n in seg) if (!(n in found)) found[n] = seg[n];
+    }
+    if (!Object.keys(found).length) {
+      // No numbers or labels at all: exactly two paragraphs are taken in order.
+      const blocks = Array.from(body.children).map(el => el.innerText.trim()).filter(Boolean);
+      if (blocks.length === 2) { found[1] = blocks[0]; found[2] = blocks[1]; }
+    }
+    for (const n in found) found[n] = clean(found[n]);
+    return found;
+  }
+
+  // Answer n of the reply; '' if it can't be told apart.
+  function pickVersion(body, n) {
+    return parseAnswers(body)[n] || '';
   }
 
   // ---------- The @grammar GPT ----------
