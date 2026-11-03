@@ -326,14 +326,30 @@
     return null;
   }
 
-  // The answer's Copy button: after your message, not part of it. It appears when the answer is complete.
-  function replyCopyButton(userEl) {
-    const list = copyButtons().filter(b => follows(userEl, b));
-    for (let i = list.length - 1; i >= 0; i--) {
-      const turn = turnOf(list[i]);
-      if (turn && !turn.contains(userEl)) return { btn: list[i], turn };
+  // Buttons only an answer's action row has (yours has Copy + Edit).
+  const ANSWER_ACTIONS = /good response|bad response|thumb|read aloud|regenerate|try again|retry|switch model/;
+
+  // The row of buttons a Copy button sits in.
+  function actionRow(btn) {
+    for (let a = btn.parentElement; a && a !== document.body; a = a.parentElement) {
+      if (a.querySelectorAll('button').length >= 2) return a;
     }
     return null;
+  }
+
+  // The answer's Copy button, after your message. It only appears once the answer is complete.
+  // Your own message's Copy (next to Edit) is never taken.
+  function replyCopyButton(userEl) {
+    const list = copyButtons().filter(b => follows(userEl, b)).map(btn => {
+      const row = actionRow(btn);
+      const labels = row ? Array.from(row.querySelectorAll('button'), buttonIdentifiers).join(' ') : '';
+      return { btn, labels, turn: turnOf(btn) };
+    }).filter(c => !/\bedit\b/.test(c.labels) && c.turn && !c.turn.contains(userEl));
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (ANSWER_ACTIONS.test(list[i].labels)) return list[i];
+    }
+    // Unknown labels: two Copy buttons after your message means yours and the answer's; take the last.
+    return copyButtons().filter(b => follows(userEl, b)).length >= 2 && list.length ? list[list.length - 1] : null;
   }
 
   // ChatGPT's own Copy writes through page-hook.js, which reports the exact text here.

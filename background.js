@@ -14,38 +14,20 @@ function report(msg, details) {
   chrome.storage.local.set({ lastIssue: { at: Date.now(), msg, details: details || null } });
 }
 
-// The ChatGPT app window (installed web app or popup) wins over a ChatGPT tab in a normal window.
+// The installed ChatGPT app window wins over a popup window, which wins over a ChatGPT tab.
 async function findChatGPTTab() {
   const wins = await chrome.windows.getAll({ populate: true, windowTypes: ['app', 'popup', 'normal'] });
   let best = null;
   for (const w of wins) {
     for (const t of w.tabs || []) {
       if (!CHATGPT_URL_RE.test(t.url || t.pendingUrl || '')) continue;
-      const rank = (w.type === 'normal' ? 0 : 2) + (t.active ? 1 : 0);
+      const rank = ({ app: 4, popup: 2 }[w.type] || 0) + (t.active ? 1 : 0);
       if (!best || rank > best.rank || (rank === best.rank && (t.lastAccessed || 0) > (best.tab.lastAccessed || 0))) {
         best = { tab: t, rank };
       }
     }
   }
   return best && best.tab;
-}
-
-async function rememberBounds(windowId) {
-  try {
-    const w = await chrome.windows.get(windowId);
-    if (w.state === 'normal') {
-      await chrome.storage.local.set({ windowBounds: { left: w.left, top: w.top, width: w.width, height: w.height } });
-    }
-  } catch (e) {}
-}
-
-// Closed: reopen as a small app-like window where the last one was.
-async function openChatGPT() {
-  const { windowBounds } = await chrome.storage.local.get('windowBounds');
-  const win = await chrome.windows.create({
-    url: 'https://chatgpt.com/', type: 'popup', focused: true, ...(windowBounds || { width: 500, height: 900 })
-  });
-  return win.tabs[0];
 }
 
 // Minimized: restore. Behind other windows: raise. Size and position stay as they are.
@@ -55,7 +37,6 @@ async function bringToFront(tab) {
     await chrome.windows.update(tab.windowId, w.state === 'minimized' ? { state: 'normal', focused: true } : { focused: true });
     if (!tab.active) await chrome.tabs.update(tab.id, { active: true });
   } catch (e) {}
-  rememberBounds(tab.windowId);
 }
 
 // Message the content script; inject it when nobody answers (tab open from before install or reload).
@@ -89,12 +70,20 @@ chrome.commands.onCommand.addListener((command) => {
 });
 
 async function onHotkey(mode) {
-  let tab = await findChatGPTTab();
-  const fresh = !tab;
-  if (fresh) tab = await openChatGPT();
-  else await bringToFront(tab);
+  const tab = await findChatGPTTab();
+  if (!tab) {
+    // Chrome lets only Web Store extensions launch an installed web app, so say so instead of
+    // opening a separate window.
+    chrome.notifications.create('one-voice-closed', {
+      type: 'basic', iconUrl: 'icons/icon-128.png', title: 'ONE voice',
+      message: 'Open the ChatGPT app first (its shelf icon or Alt+its shelf number), then press the key again.'
+    });
+    report('ChatGPT app is closed');
+    return;
+  }
+  await bringToFront(tab);
 
-  const status = await ask(tab.id, { type: 'status' }, fresh ? 20000 : 3000);
+  const status = await ask(tab.id, { type: 'status' }, 3000);
   if (!status) {
     report('ChatGPT page did not answer', tab.url || tab.pendingUrl || '');
     return;

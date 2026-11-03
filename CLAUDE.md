@@ -4,8 +4,8 @@ MV3 extension, no build step. User-facing behaviour is in `README.md`.
 
 ## Files
 
-- `background.js` — hotkeys (`1-plain`, `2-grammar`; the stop key picks the mode), finds the ChatGPT window (app/popup window over normal tabs), restores/raises it on every press or reopens it at the saved bounds, media pause/resume, clipboard via the offscreen page. Never minimizes.
-- `content.js` — runs in ChatGPT: clicks mic, then ■ in the recording bar `✕ ~~~ ■ ↑` (see `findStop`), reads the transcript, for grammar types the `@mention`, picks the row under "Custom GPTs", sends, finds your message by its text and the answer's Copy button after it, presses it.
+- `background.js` — hotkeys (`1-plain`, `2-grammar`; the stop key picks the mode), finds the ChatGPT window (installed app > popup > tab), restores/raises it on every press, never minimizes; when none is open it shows a notification (an unpacked extension can't launch an installed web app: `management.installReplacementWebApp` requires a Web Store install). Media pause/resume, clipboard via the offscreen page.
+- `content.js` — runs in ChatGPT: clicks mic, then ■ in the recording bar `✕ ~~~ ■ ↑` (see `findStop`), reads the transcript, for grammar types the `@mention`, picks the row under "Custom GPTs", sends, finds your message by its text and the answer's Copy button after it (row with 👍/👎-type labels, never the row with Edit), presses it.
 - `page-hook.js` — MAIN-world script: reports the text ChatGPT's own Copy writes (`navigator.clipboard`), so the exact answer is copied even without focus.
 - `offscreen.html/js` — clipboard writer (works without window focus).
 - `options.html/js` — popup settings: mention, max duration, media pausing; lists current hotkeys; shows the last problem (`storage.local.lastIssue`) with Copy details.
