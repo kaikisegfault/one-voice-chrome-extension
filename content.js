@@ -20,6 +20,7 @@
     preText: '',
     startedAt: 0,
     maxTimer: null,
+    result: null,       // what the clipboard got: { kind: 'words' | 'answer', chars }
     scope: null,        // composer area, kept from before recording (the input is swapped out while recording)
     idleSigs: new Set(), // buttons there before recording
     trailing: null,     // rect of the send / voice button at the far right, never the stop button
@@ -175,7 +176,7 @@
   function report(msg, details) {
     console.warn(LOG, msg, details || '');
     try {
-      chrome.storage.local.set({ lastIssue: { at: Date.now(), msg, details: details || null, url: location.href } });
+      chrome.storage.local.set({ lastIssue: { at: Date.now(), msg, details: details || null } });
     } catch (e) {}
   }
 
@@ -352,14 +353,17 @@
     return copyButtons().filter(b => follows(userEl, b)).length >= 2 && list.length ? list[list.length - 1] : null;
   }
 
-  // ChatGPT's own Copy writes through page-hook.js, which reports the exact text here.
-  const pageCopies = [];
+  // ChatGPT's own Copy writes through page-hook.js, which reports the text here. It's taken only
+  // right after we press Copy, and never kept.
+  let catcher = null;
   window.addEventListener('message', (e) => {
-    if (e.source === window && e.data && e.data.__oneVoice === 'copied' && typeof e.data.text === 'string') {
-      pageCopies.push({ at: Date.now(), text: e.data.text });
-      if (pageCopies.length > 5) pageCopies.shift();
+    if (catcher && e.source === window && e.data && e.data.__oneVoice === 'copied' && typeof e.data.text === 'string') {
+      catcher(e.data.text);
     }
   });
+
+  // ChatGPT's Copy gives markdown, so "1)" arrives as "1\)": drop the escaping backslashes.
+  const unescapeMarkdown = (t) => t.replace(/\\([!-\/:-@\[-`{-~])/g, '$1');
 
   // ---------- The @grammar GPT ----------
 
@@ -437,10 +441,15 @@
 
   // Exactly what ChatGPT's Copy button copies; the answer's visible text if that can't be caught.
   async function copyReply(found, run) {
-    const clickedAt = Date.now();
-    await realisticClick(found.btn);
-    const caught = await waitFor(() => pageCopies.find(c => c.at >= clickedAt), 1500, 50, run);
-    if (caught && caught.text.trim()) return caught.text.trim();
+    let caught = null;
+    catcher = (t) => { caught = t; };
+    try {
+      await realisticClick(found.btn);
+      await waitFor(() => caught !== null, 1500, 50, run);
+    } finally {
+      catcher = null;
+    }
+    if (caught && caught.trim()) return unescapeMarkdown(caught.trim());
     const md = found.turn.querySelector('.markdown');
     console.log(LOG, 'Copy button text not caught, using the visible answer');
     return blockText(md || found.turn);
@@ -457,6 +466,7 @@
     if (!sendBtn) throw fail('send button not ready', describeButtons(composerScope()));
     const head = norm(text).slice(0, 40);
     const before = new Set(textMatches(head));
+    send('progress', { step: 'answer' });
     await realisticClick(sendBtn);
     // Your message: the first new element showing your words (a corrected copy in the answer comes later).
     const userEl = await waitFor(() => textMatches(head).find(el => !before.has(el)), 8000, 100, run);
@@ -501,7 +511,7 @@
     if (err) report(err.message, err.details);
     clearTimeout(S.maxTimer);
     S.state = 'idle';
-    send('done');
+    send('done', { result: S.result, error: err ? err.message : null });
   }
 
   async function start(mode) {
@@ -533,6 +543,7 @@
     if (S.state !== 'recording' || run !== S.run) return;
     clearTimeout(S.maxTimer);
     S.state = 'processing';
+    S.result = null;
     try {
       const stopBtn = await waitFor(findStop, 1500, 100, run);
       if (!stopBtn) {
@@ -540,16 +551,18 @@
           describeButtons(S.scope && S.scope.isConnected ? S.scope : document));
       }
       await realisticClick(stopBtn);
+      send('progress', { step: 'transcribing' });
       const text = await waitForTranscript(run, (Date.now() - S.startedAt) / 1000);
 
       // Raw text first, so a failed GPT step still leaves you the dictation.
       const copied = await copy(text);
+      if (copied) S.result = { kind: 'words', chars: text.length };
       if (mode === 'plain') {
         const composer = findComposer();
         if (copied && composer) clearComposer(composer);
       } else {
         const answer = await askGPT(text, run);
-        if (answer) await copy(answer);
+        if (answer && await copy(answer)) S.result = { kind: 'answer', chars: answer.length };
       }
       finish(run);
     } catch (e) {
@@ -562,7 +575,7 @@
     clearTimeout(S.maxTimer);
     S.state = 'idle';
     console.log(LOG, 'cancelled');
-    send('done');
+    send('done', { cancelled: true });
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

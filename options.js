@@ -1,6 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const MEDIA_ORIGINS = ['*://*.youtube.com/*', '*://*.spotify.com/*'];
-const DEFAULTS = { maxDuration: 600, pauseMedia: false, mention: '@grammar' };
+const DEFAULTS = { maxDuration: 600, pauseMedia: false, mention: '@grammar', notify: true };
 
 async function refreshPauseMediaStatus() {
   const hasPerm = await chrome.permissions.contains({ origins: MEDIA_ORIGINS });
@@ -33,6 +33,7 @@ async function load() {
   $('maxDuration').value = cfg.maxDuration;
   $('mention').value = cfg.mention;
   $('pauseMedia').checked = !!cfg.pauseMedia;
+  $('notify').checked = cfg.notify !== false;
   refreshPauseMediaStatus();
   showKeys();
   showIssue();
@@ -55,7 +56,7 @@ async function save() {
     try { await chrome.permissions.remove({ origins: MEDIA_ORIGINS }); } catch (e) {}
   }
 
-  await chrome.storage.sync.set({ maxDuration, mention, pauseMedia });
+  await chrome.storage.sync.set({ maxDuration, mention, pauseMedia, notify: $('notify').checked });
   $('maxDuration').value = maxDuration;
   $('mention').value = mention;
   $('status').textContent = 'Saved';

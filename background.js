@@ -1,7 +1,7 @@
 const CHATGPT_URL_RE = /^https:\/\/(chatgpt\.com|chat\.openai\.com)\//;
 const MEDIA_URL_PATTERNS = ['*://*.youtube.com/*', '*://*.spotify.com/*'];
 const MODE_BY_COMMAND = { '1-plain': 'plain', '2-grammar': 'grammar' };
-const DEFAULTS = { maxDuration: 600, pauseMedia: false, mention: '@grammar' };
+const DEFAULTS = { maxDuration: 600, pauseMedia: false, mention: '@grammar', notify: true };
 const PAUSED_IDS_KEY = 'pausedTabIds';
 const SAFETY_RESUME_MS = 15 * 60 * 1000;
 
@@ -59,6 +59,56 @@ async function ask(tabId, msg, waitMs = 0) {
   }
 }
 
+// ---------- Notifications: recording time, working, copied (visible over every window) ----------
+
+const NOTE = 'one-voice';
+let tick = null;
+let closeTimer = null;
+
+function stopTick() {
+  clearInterval(tick);
+  tick = null;
+}
+
+async function notify(title, message, { sticky = false, autoClose = 0, force = false } = {}) {
+  if (!force && !(await chrome.storage.sync.get({ notify: true })).notify) return false;
+  clearTimeout(closeTimer);
+  await chrome.notifications.create(NOTE, {
+    type: 'basic', iconUrl: 'icons/icon-128.png', title, message: message || ' ',
+    silent: true, requireInteraction: sticky, priority: 1
+  });
+  if (autoClose) closeTimer = setTimeout(() => chrome.notifications.clear(NOTE), autoClose);
+  return true;
+}
+
+async function noteRecording() {
+  const keys = Object.fromEntries((await chrome.commands.getAll()).map(c => [c.name, c.shortcut || 'its key']));
+  const t0 = Date.now();
+  const title = () => {
+    const sec = Math.floor((Date.now() - t0) / 1000);
+    return `● Recording ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  };
+  stopTick();
+  const shown = await notify(title(), `Stop: ${keys['1-plain']} your words · ${keys['2-grammar']} GPT answer`, { sticky: true });
+  if (shown) tick = setInterval(() => chrome.notifications.update(NOTE, { title: title() }), 1000);
+}
+
+function noteDone(msg) {
+  stopTick();
+  const r = msg.result;
+  if (msg.cancelled) return notify('Cancelled', 'Nothing more will be copied.', { autoClose: 3000 });
+  if (r && r.kind === 'answer') return notify('✓ Copied: GPT answer', `${r.chars} characters · paste with Ctrl+V`, { autoClose: 5000 });
+  if (r && !msg.error) return notify('✓ Copied: your words', `${r.chars} characters · paste with Ctrl+V`, { autoClose: 5000 });
+  if (r) return notify('Copied your words only', `${msg.error}. Details: extension popup.`, { autoClose: 8000 });
+  return notify('Nothing copied', `${msg.error || 'Something went wrong'}. Details: extension popup.`, { autoClose: 8000 });
+}
+
+chrome.notifications.onClicked.addListener(async (id) => {
+  if (id !== NOTE) return;
+  const tab = await findChatGPTTab();
+  if (tab) bringToFront(tab);
+});
+
 // ---------- Hotkeys ----------
 
 let queue = Promise.resolve();
@@ -74,10 +124,8 @@ async function onHotkey(mode) {
   if (!tab) {
     // Chrome lets only Web Store extensions launch an installed web app, so say so instead of
     // opening a separate window.
-    chrome.notifications.create('one-voice-closed', {
-      type: 'basic', iconUrl: 'icons/icon-128.png', title: 'ONE voice',
-      message: 'Open the ChatGPT app first (its shelf icon or Alt+its shelf number), then press the key again.'
-    });
+    notify('ChatGPT app is closed', 'Open it (its shelf icon, or Alt + its shelf number), then press the key again.',
+      { autoClose: 8000, force: true });
     report('ChatGPT app is closed');
     return;
   }
@@ -91,8 +139,10 @@ async function onHotkey(mode) {
 
   if (status.state === 'idle') {
     const [, res] = await Promise.all([pauseMediaTabs(), ask(tab.id, { type: 'start', mode })]);
-    if (!res || !res.ok) await resumeMediaTabs();
+    if (res && res.ok) noteRecording();
+    else await resumeMediaTabs();
   } else if (status.state === 'recording') {
+    stopTick();
     resumeMediaTabs();
     await ask(tab.id, { type: 'stop', mode });
   } else {
@@ -205,7 +255,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     writeClipboard(String(msg.text || '')).then(ok => sendResponse({ ok }));
     return true;
   }
-  if (msg.type === 'done') resumeMediaTabs();
+  if (msg.type === 'progress') {
+    stopTick();
+    if (msg.step === 'transcribing') notify('Transcribing…', 'Your words go to the clipboard first.', { sticky: true });
+    if (msg.step === 'answer') notify('Waiting for the GPT answer…', 'Your words are already in the clipboard.', { sticky: true });
+  }
+  if (msg.type === 'done') {
+    resumeMediaTabs();
+    noteDone(msg);
+  }
 });
 
 chrome.runtime.onInstalled.addListener(async () => {
