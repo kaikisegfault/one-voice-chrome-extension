@@ -1,14 +1,16 @@
 {
   "manifest_version": 3,
   "name": "ONE voice (ChatGPT)",
-  "version": "0.2.0",
-  "description": "Global hotkey voice-to-text via ChatGPT browser dictation. Press the hotkey, speak, press again — transcription lands in your clipboard. Optionally pauses YouTube/Spotify while recording.",
+  "version": "0.3.0",
+  "description": "Global hotkey voice-to-text via ChatGPT dictation. Plain: raw text to clipboard. Grammar / Fluent: your @grammar GPT rewrites it, and its answer lands in your clipboard.",
   "minimum_chrome_version": "116",
   "permissions": [
     "storage",
     "scripting",
     "tabs",
-    "alarms"
+    "alarms",
+    "offscreen",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",
@@ -33,8 +35,19 @@
     }
   ],
   "commands": {
-    "toggle-recording": {
-      "description": "ONE voice: toggle ChatGPT recording",
+    "1-plain": {
+      "suggested_key": { "default": "Ctrl+Shift+1" },
+      "description": "Plain: start / stop dictation, raw text to clipboard",
+      "global": true
+    },
+    "2-grammar": {
+      "suggested_key": { "default": "Ctrl+Shift+2" },
+      "description": "Grammar: start / stop dictation, corrected text (answer 1) to clipboard",
+      "global": true
+    },
+    "3-fluent": {
+      "suggested_key": { "default": "Ctrl+Shift+3" },
+      "description": "Fluent: start / stop dictation, fluent rewrite (answer 2) to clipboard",
       "global": true
     }
   },

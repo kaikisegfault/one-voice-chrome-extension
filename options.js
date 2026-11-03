@@ -1,5 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const MEDIA_ORIGINS = ['*://*.youtube.com/*', '*://*.spotify.com/*'];
+const DEFAULTS = { maxDuration: 600, pauseMedia: false, mention: '@grammar' };
 
 async function refreshPauseMediaStatus() {
   const hasPerm = await chrome.permissions.contains({ origins: MEDIA_ORIGINS });
@@ -7,36 +8,44 @@ async function refreshPauseMediaStatus() {
   if ($('pauseMedia').checked && !hasPerm) {
     el.textContent = 'Permission not granted — feature inactive. Re-check the box to request it.';
     el.style.color = '#cf222e';
-  } else if ($('pauseMedia').checked && hasPerm) {
-    el.textContent = 'Active: extension can pause YouTube + Spotify tabs during recording.';
+  } else if ($('pauseMedia').checked) {
+    el.textContent = 'Active: YouTube + Spotify tabs pause while recording.';
     el.style.color = '#1f883d';
   } else {
     el.textContent = '';
   }
 }
 
+async function showKeys() {
+  const table = $('keys');
+  table.textContent = '';
+  for (const c of (await chrome.commands.getAll()).filter(c => c.description)) {
+    const tr = table.insertRow();
+    const key = document.createElement('kbd');
+    key.textContent = c.shortcut || 'not set';
+    tr.insertCell().append(key);
+    tr.insertCell().textContent = c.description;
+  }
+}
+
 async function load() {
-  const cfg = await chrome.storage.sync.get({
-    maxDuration: 600,
-    autoSend: true,
-    pauseMedia: false
-  });
+  const cfg = await chrome.storage.sync.get(DEFAULTS);
   $('maxDuration').value = cfg.maxDuration;
-  $('autoSend').checked = cfg.autoSend !== false;
+  $('mention').value = cfg.mention;
   $('pauseMedia').checked = !!cfg.pauseMedia;
   refreshPauseMediaStatus();
+  showKeys();
 }
 
 async function save() {
   const maxDuration = Math.max(10, Math.min(3600, parseInt($('maxDuration').value, 10) || 600));
-  const autoSend = $('autoSend').checked;
+  let mention = $('mention').value.trim() || DEFAULTS.mention;
+  if (!mention.startsWith('@')) mention = '@' + mention;
   let pauseMedia = $('pauseMedia').checked;
 
   if (pauseMedia) {
-    const hasPerm = await chrome.permissions.contains({ origins: MEDIA_ORIGINS });
-    if (!hasPerm) {
-      const granted = await chrome.permissions.request({ origins: MEDIA_ORIGINS });
-      if (!granted) {
+    if (!(await chrome.permissions.contains({ origins: MEDIA_ORIGINS }))) {
+      if (!(await chrome.permissions.request({ origins: MEDIA_ORIGINS }))) {
         pauseMedia = false;
         $('pauseMedia').checked = false;
       }
@@ -45,8 +54,9 @@ async function save() {
     try { await chrome.permissions.remove({ origins: MEDIA_ORIGINS }); } catch (e) {}
   }
 
-  await chrome.storage.sync.set({ maxDuration, autoSend, pauseMedia });
+  await chrome.storage.sync.set({ maxDuration, mention, pauseMedia });
   $('maxDuration').value = maxDuration;
+  $('mention').value = mention;
   $('status').textContent = 'Saved';
   setTimeout(() => { $('status').textContent = ''; }, 1500);
   refreshPauseMediaStatus();

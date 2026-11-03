@@ -1,130 +1,73 @@
 # ONE voice (ChatGPT)
 
-Global-hotkey voice-to-text via the ChatGPT browser dictation. Press your hotkey, speak, press again — transcription lands in your clipboard, and (optionally) auto-submits to the ChatGPT conversation you have open so a custom GPT can post-process it.
+Global-hotkey voice-to-text through ChatGPT's own browser dictation. Press a hotkey, speak, press again — the result lands in your clipboard. No API keys, no OpenAI bill: it drives the ChatGPT page you're already logged in to.
 
-Companion to [`explorills/one-voice`](https://github.com/explorills/one-voice) (the VS Code / Whisper-API edition). Same ergonomics, different engine — this one drives the real ChatGPT dictation in your logged-in browser session, which is why it nails 99%+ accuracy with zero API keys to manage and no OpenAI bill.
+Companion to [`explorills/one-voice`](https://github.com/explorills/one-voice) (the VS Code / Whisper-API edition).
 
-## How it works
+## Three modes
 
-1. You keep **chatgpt.com** open in a tab (preferably as a PWA window — see below). Minimize it.
-2. From anywhere on your machine, press your hotkey (set at `chrome://extensions/shortcuts`).
-3. The ChatGPT window un-minimizes and focuses. The extension clicks the mic button — recording starts. You see the waveform UI.
-4. Press the hotkey again to stop. The extension clicks the confirm (✓) button, waits for Whisper to transcribe, then:
-   - copies the transcription to your clipboard,
-   - (optionally) clicks Send so the message is submitted to whatever conversation / custom GPT you have open,
-   - minimizes the ChatGPT window.
-5. Paste anywhere with Ctrl+V.
+| Default key | Mode | Clipboard gets |
+|---|---|---|
+| `Ctrl+Shift+1` | **Plain** | Your words exactly as ChatGPT transcribed them. Nothing is sent. |
+| `Ctrl+Shift+2` | **Grammar** | Answer **1)** of your `@grammar` GPT — the corrected text. |
+| `Ctrl+Shift+3` | **Fluent** | Answer **2)** of your `@grammar` GPT — the fluent rewrite. |
 
-Feedback is purely native — the window popping forward and receding is the UX. No toasts, no popovers, no background CPU. The service worker sleeps until the next hotkey press.
+- Press any mode key to start; the key you **stop** with decides the mode. So you can start talking and decide at the end.
+- Grammar / Fluent: after you stop, the extension types `@grammar` in ChatGPT, picks the GPT listed under **Custom GPTs** (not Plugins), adds your words, sends, waits for the answer, and copies the part you asked for. The raw text is copied first, so if anything fails you still have your dictation.
+- Pressing a key while it's waiting for the answer cancels.
+- Change keys at `chrome://extensions/shortcuts`; keep the scope **Global** so they work from any window, Linux apps included.
 
-## Recommended pairing: a custom GPT for grammar + fluent alternative
-
-The intended workflow is to leave ChatGPT open on a conversation with a custom GPT that post-processes each dictation. A public one the author uses and recommends:
-
-**[Grammar Check + Fluent Alternative](https://chatgpt.com/g/g-aizdZTwve-grammar-check-fluent-alternative)**
-
-What you get when **auto-send is on**:
-
-- Raw Whisper transcription → your clipboard (paste anywhere as-is)
-- Same transcription → submitted to the custom GPT, which returns a grammar-checked + fluent alternative version you can copy from the chat
-- A running history of every dictation you've made, kept in the ChatGPT conversation itself — useful for review, re-reading, or re-copying older transcripts
-
-If you don't want the running history or the auto-submitted message, **uncheck "Auto-send to ChatGPT after copy"** in the extension options. With auto-send off, the extension only copies the raw transcription to clipboard — nothing is submitted, nothing is logged in any conversation.
-
-Either mode, the clipboard always gets the raw transcription the instant it lands in the composer.
+The GPT must answer in the shape `1) corrected … 2) fluent …` — e.g. [Grammar Check + Fluent Alternative](https://chatgpt.com/g/g-aizdZTwve-grammar-check-fluent-alternative). If the answer isn't shaped like that, the whole answer is copied.
 
 ## Install (unpacked)
 
-1. Clone this repo anywhere:
-   ```bash
-   git clone https://github.com/explorills/one-voice-chrome-extension.git
-   ```
-2. Open `chrome://extensions/`, enable **Developer mode** (top right).
-3. Click **Load unpacked**, select the cloned folder.
-4. Open `chrome://extensions/shortcuts`, find **ONE voice (ChatGPT) → toggle ChatGPT recording**.
-5. Click the pencil icon, press the key combo you want, set the scope dropdown to **Global**.
+1. `git clone https://github.com/explorills/one-voice-chrome-extension.git`
+2. `chrome://extensions/` → switch on **Developer mode** (the switch on that page, top right).
+3. **Load unpacked** → pick the folder that holds `manifest.json`.
+4. Check the keys at `chrome://extensions/shortcuts`. Chrome leaves a default key unset if another extension already uses it.
 
-### Hotkey options
+### ChromeOS: keep it after restarts
 
-Chrome's shortcut UI accepts most modifier combinations but **rejects a few specific keys** (notably `Pause/Break` on ChromeOS). Combos that reliably work:
+Chrome drops an unpacked extension loaded from **Linux files** on every restart, because the Linux container isn't running yet when Chrome starts. Load it from **My files** instead:
 
-- `Ctrl+K` *(simple; may conflict with ChatGPT's own search shortcut if you're focused on that tab)*
-- `Ctrl+Shift+Space`
-- `Alt+Shift+V`
-- `Ctrl+Shift+;`
-- Any `Ctrl+F1..F12` / `Alt+F1..F12`
+1. Files app → right-click **Downloads** → **Share with Linux** (once).
+2. In the repo: `./sync-to-chromeos.sh` — copies the extension to **My files › Downloads › one-voice-chrome-extension**.
+3. **Load unpacked** that folder. After each update, run the script again and press ⟳ on the extension.
 
-Set the scope dropdown to **Global** so it fires regardless of which window has focus.
+## First run
 
-## First-run checklist
+- Open `https://chatgpt.com`, click its mic once by hand and allow microphone access (one-time, per site).
+- Leave a normal chat open (not a custom-GPT chat page); minimize it. Installing ChatGPT as an app window (⋮ → **Install ChatGPT…**) keeps it out of your tabs.
+- No ChatGPT tab open? The hotkey opens a new one.
 
-- Open `https://chatgpt.com` once, click the mic button by hand, allow microphone access when Chrome prompts. This is a one-time permission grant per origin — the extension never asks for mic access itself.
-- Open your preferred conversation (e.g. the [Grammar Check + Fluent Alternative](https://chatgpt.com/g/g-aizdZTwve-grammar-check-fluent-alternative) GPT linked above) so the hotkey always dictates into that context.
-- Recommended: install ChatGPT as a standalone app window:
-  - On `chatgpt.com`, click the ⋮ (three-dot) menu in the address bar → **Install ChatGPT…** (or **Create shortcut… → Open as window**).
-  - Size/position the window however you like (Chrome remembers it per-PWA). Minimize when done.
-- The extension finds the ChatGPT tab/window whether it's focused, backgrounded, or minimized.
-
-### Choosing which microphone is used
-
-The extension has no say in microphone selection — it just clicks ChatGPT's mic button, which uses whatever Chrome considers the default audio input. To verify or change:
-
-- **ChromeOS:** Settings → Device → Audio → Input → pick the mic you want
-- **Chrome (all platforms):** `chrome://settings/content/microphone` → top dropdown
-- If ChatGPT ever asks mid-session, it'll reuse your last granted choice
+Microphone choice is Chrome's default input: ChromeOS Settings → Device → Audio → Input, or `chrome://settings/content/microphone`.
 
 ## Settings
 
-Open the extension's options page (extension icon → Options, or `chrome://extensions/` → **Details → Extension options**):
+Extension icon → popup:
 
-- **Max recording duration** *(default 600s / 10 min, range 10–3600)* — recording auto-stops at this limit.
-- **Auto-send to ChatGPT after copy** *(default on)* — submits the transcribed message to the current ChatGPT conversation so your custom GPT can process it and your dictation history accumulates in the chat. Turn off for clipboard-only behaviour.
-- **Pause YouTube / Spotify during recording** *(default off)* — when enabled, the extension pauses any `<video>`/`<audio>` currently playing in YouTube, YouTube Music, or Spotify web tabs the moment you press the hotkey, and resumes them on the second press (after the transcription is captured). Useful when you're listening to music on headphones — background audio bleed into the mic is the top cause of Whisper accuracy drops. The first time you enable this, Chrome prompts you to grant permission for `*.youtube.com` and `*.spotify.com` — that's the entire scope. Nothing else is touched. Revoke anytime at `chrome://extensions/` → Details → Site access, or just uncheck the option (the extension will automatically request permission removal). If you listen via a native Android app or Bluetooth source from your phone, this feature cannot reach those — Chrome extensions have no API to pause non-Chrome audio on ChromeOS.
-
-## ChromeOS + Crostini notes
-
-- The hotkey is registered as **Global** — it fires from any window including Crostini Linux windows (VS Code, terminal, etc.), as long as the chosen key isn't consumed by the focused app.
-- If a particular Linux window ever swallows the key, bind a different combo at `chrome://extensions/shortcuts`.
-- All feedback is native window behaviour (focus + minimize) — no OS-level notifications, no popovers. The window popping into view is your "recording started" cue; it disappearing means the transcription is in your clipboard.
+- **GPT to mention** *(default `@grammar`)* — what Grammar / Fluent type in ChatGPT.
+- **Max recording duration** *(default 600 s, 10–3600)* — auto-stops at this limit, in the mode you started with.
+- **Pause YouTube / Spotify during recording** *(default off)* — pauses playing YouTube, YouTube Music and Spotify web tabs on start, resumes on the stop press. Asks for access to those two sites only. Can't reach native Android apps or Bluetooth audio.
 
 ## Troubleshooting
 
-Open DevTools on the ChatGPT tab (F12 → Console). Our log lines all start with `[ONE voice]`. Any other red/yellow lines (`SES_UNCAUGHT_EXCEPTION: null`, `ScriptProcessorNode deprecated`, `SES Removing unpermitted intrinsics`) are from ChatGPT's own bundle, present on every visit, and are not caused by this extension.
+Open DevTools on the ChatGPT tab (F12 → Console); all lines from this extension start with `[ONE voice]`. Other red/yellow lines (`SES_UNCAUGHT_EXCEPTION`, `ScriptProcessorNode deprecated`, …) come from ChatGPT itself.
 
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| Hotkey does nothing | Scope not set to Global, or key already bound elsewhere | Re-bind at `chrome://extensions/shortcuts`, scope = Global |
-| Mic button not found | You aren't on a ChatGPT conversation page, or ChatGPT changed their UI | Navigate to an active chat; if persistent, open an issue with the `[ONE voice] mic not matched. Buttons: ...` log line |
-| Recording was cancelled by ChatGPT | ChatGPT's own backend returned 403 on `/estuary/content` (session/gizmo auth hiccup) | Sign out of chatgpt.com and back in; if persistent, your custom GPT may be rate-limited |
-| Confirm button missing | ChatGPT cancelled mid-recording (see above) | Extension now aborts cleanly — just press the hotkey fresh to retry |
-| Clipboard write blocked | Some Chrome versions require tab focus for clipboard writes | Click the ChatGPT tab once, retry |
-| Wrong mic used | ChromeOS/Chrome default input not what you want | See "Choosing which microphone is used" above |
-| Music didn't pause | Pause-media option not enabled, or permission not granted, or audio source is a native app / Bluetooth | Enable in options and grant permission; native/Bluetooth audio sources can't be paused by a Chrome extension |
-| Music didn't resume | Edge case — the `done` event was lost | Extension auto-resumes after 15 min as a safety net; or just press the hotkey twice on a silent page to restore |
+| Symptom | Fix |
+|---|---|
+| Hotkey does nothing | Key unset or taken: re-bind at `chrome://extensions/shortcuts`, scope Global. |
+| `mic not matched` | Open a normal chat page; if it persists, send the logged button list. |
+| `not found under Custom GPTs` / `did not select it` | ChatGPT changed its @ list. The line includes the popup HTML — send it so the matcher can be fixed. Your raw text is already in the clipboard. |
+| `recording was cancelled by ChatGPT` | ChatGPT's backend refused (a 403); press again. Signing out and in helps if it repeats. |
+| Music didn't resume | It auto-resumes after 15 min as a safety net. |
 
 ## Security
 
-- **Local-only.** The extension makes zero network requests of its own. Your voice audio goes to OpenAI via ChatGPT's normal dictation flow, identical to clicking the mic by hand. Read the source — no `fetch`, no websocket, no telemetry.
-- **Minimal scope by default.** `host_permissions` is limited to `chatgpt.com` and `chat.openai.com`; the extension cannot touch any other tab or domain unless you opt in.
-- **Minimal permissions.** `storage` (three settings), `scripting` (inject content script into ChatGPT only, plus YouTube/Spotify if the pause-media feature is enabled), `tabs` (find/focus/minimize the ChatGPT window). No `notifications`, no debugger, no native messaging, no telemetry.
-- **Opt-in host access.** If you enable **Pause YouTube / Spotify**, the extension requests `*.youtube.com` and `*.spotify.com` as optional host permissions — nothing broader. Disabling the checkbox also removes the permission. Refuse the prompt and the feature stays off; everything else continues to work.
-- **Verify yourself:** `chrome://extensions/` → Details → Permissions / Site access. Without the pause-media option, the list should be exactly `Read and change your data on chatgpt.com and chat.openai.com`. With it on, additionally `*.youtube.com` and `*.spotify.com`. If the list ever grows beyond this after an update, review the diff before accepting.
-
-## Sibling project
-
-[`explorills/one-voice`](https://github.com/explorills/one-voice) — original VS Code extension using the OpenAI Whisper API directly (with optional GPT grammar cleanup via API). Same Pause/Break ergonomics; different engine; requires an OpenAI API key. Use that one if you want editor-cursor insertion or terminal typing output; use this one if you want the reliability of ChatGPT's in-browser dictation and the free-with-ChatGPT-Plus cost profile.
-
-## Roadmap
-
-- Per-install default GPT URL (auto-open the configured conversation if no ChatGPT tab is found)
-- Chrome Web Store listing
-- Proper icon / branding pass
-- Optional popover near the cursor (current feedback is window-focus only)
+- Makes no network requests of its own; your audio goes to OpenAI exactly as when you click the mic yourself.
+- Host access: `chatgpt.com` and `chat.openai.com` only, plus `*.youtube.com` / `*.spotify.com` only if you switch on media pausing (switching it off removes them).
+- Permissions: `storage` (settings), `scripting` + `tabs` (find, focus and minimize the ChatGPT window), `alarms` (media safety-resume), `offscreen` + `clipboardWrite` (copy even when the ChatGPT window has no focus).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
-
----
-
-Part of the [ONE Ecosystem](https://expl.one).
+MIT — see [LICENSE](LICENSE). Part of the [ONE Ecosystem](https://expl.one).
