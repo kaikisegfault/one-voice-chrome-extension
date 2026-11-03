@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ONE voice (ChatGPT)",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Global hotkey voice-to-text via ChatGPT dictation. Plain: raw text to clipboard. Grammar / Fluent: your @grammar GPT rewrites it, and its answer lands in your clipboard.",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -29,26 +29,31 @@
         "https://chatgpt.com/*",
         "https://chat.openai.com/*"
       ],
-      "js": ["content.js"],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     }
   ],
   "commands": {
     "1-plain": {
-      "suggested_key": { "default": "Ctrl+Shift+1" },
-      "description": "Plain: start / stop dictation, raw text to clipboard",
-      "global": true
+      "suggested_key": {
+        "default": "Ctrl+Shift+1"
+      },
+      "description": "Plain: start / stop dictation, raw text to clipboard"
     },
     "2-grammar": {
-      "suggested_key": { "default": "Ctrl+Shift+2" },
-      "description": "Grammar: start / stop dictation, corrected text (answer 1) to clipboard",
-      "global": true
+      "suggested_key": {
+        "default": "Ctrl+Shift+2"
+      },
+      "description": "Grammar: start / stop dictation, corrected text (answer 1) to clipboard"
     },
     "3-fluent": {
-      "suggested_key": { "default": "Ctrl+Shift+3" },
-      "description": "Fluent: start / stop dictation, fluent rewrite (answer 2) to clipboard",
-      "global": true
+      "suggested_key": {
+        "default": "Ctrl+Shift+3"
+      },
+      "description": "Fluent: start / stop dictation, fluent rewrite (answer 2) to clipboard"
     }
   },
   "options_ui": {

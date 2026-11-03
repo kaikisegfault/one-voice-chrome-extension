@@ -17,7 +17,8 @@ Companion to [`kaikisegfault/one-voice`](https://github.com/kaikisegfault/one-vo
 - Pressing a key while it's waiting for the answer cancels.
 - Every press brings the ChatGPT window into view: restored if minimized, raised if behind, reopened where it last was if closed. Its size and position stay; nothing minimizes it.
 - In the recording bar `✕ ~~~ ■ ↑` the stop press clicks **■** (text into the input, nothing sent yet), never ✕ or ↑.
-- Change keys at `chrome://extensions/shortcuts`; set each one's scope to **Global** so they work from any window, Linux apps included.
+- The keys work while any Chrome window has focus: browser tabs, the ChatGPT app window, other installed web apps. ChromeOS doesn't offer **Global** extension shortcuts (Chrome hides that scope and ignores it there), so Linux apps such as VS Code can't trigger them. From a Linux app: pin ChatGPT to the shelf and press `Alt+<its shelf position>` to bring it forward, then the mode key.
+- Change keys at `chrome://extensions/shortcuts`.
 
 The GPT gives two versions, corrected first and fluent second — e.g. [Grammar Check + Fluent Alternative](https://chatgpt.com/g/g-aizdZTwve-grammar-check-fluent-alternative). Any common shape is understood: `1)` `1.` `1:` `(1)` `[1]` `#1` `1 -` `1️⃣` `Option 1:` / `Version 1:`, a markdown list, labels like `Grammar:` / `Corrected:` / `Fluent alternative:` (also as headings), both on one line, or just two paragraphs. Wrapping quotes and labels are stripped. If the two can't be told apart, the whole answer is copied.
 
@@ -26,7 +27,7 @@ The GPT gives two versions, corrected first and fluent second — e.g. [Grammar 
 1. `git clone https://github.com/kaikisegfault/one-voice-chrome-extension.git`
 2. `chrome://extensions/` → switch on **Developer mode** (the switch on that page, top right).
 3. **Load unpacked** → pick the folder that holds `manifest.json`.
-4. Check the keys at `chrome://extensions/shortcuts`. Chrome leaves a default key unset if another extension already uses it.
+4. Check the keys at `chrome://extensions/shortcuts`. Chrome leaves a default key unset if another extension or Chrome itself already uses it.
 
 ### ChromeOS: keep it after restarts
 
@@ -60,8 +61,8 @@ Start with **Last problem** in the extension popup. The same lines appear in Dev
 
 | Symptom | Fix |
 |---|---|
-| Hotkey works only inside Chrome | Its scope is "In Chrome": set it to **Global** at `chrome://extensions/shortcuts`. |
-| Hotkey does nothing | Key unset or taken by another extension: re-bind it there. |
+| Hotkey does nothing in a Linux app | Expected on ChromeOS: focus a Chrome window first (e.g. `Alt+<shelf position>` of the ChatGPT app). |
+| Hotkey does nothing anywhere | Key unset or taken: re-bind it at `chrome://extensions/shortcuts`. After an update that changed the keys, remove the extension and load it again. |
 | `mic button not found` / `stop button not found` | ChatGPT changed its buttons: send **Copy details**. |
 | `not found under Custom GPTs` / `did not select it` | ChatGPT changed its @ list: send **Copy details**. Your raw text is already in the clipboard. |
 | `no transcription arrived` | ChatGPT's transcription failed (often a 403); press again. Signing out and in helps if it repeats. |

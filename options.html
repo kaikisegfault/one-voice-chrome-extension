@@ -30,7 +30,7 @@
     <label>Hotkeys</label>
     <table id="keys"></table>
     <div class="hint">Press once to start, again to stop. The key you stop with picks the result. Pressing while it waits for the answer cancels.
-      Change keys at <a href="#" id="shortcuts">chrome://extensions/shortcuts</a> (keep scope <b>Global</b>).</div>
+      They work while any Chrome window has focus (browser, ChatGPT app, other web apps). Change them at <a href="#" id="shortcuts">chrome://extensions/shortcuts</a>.</div>
   </div>
 
   <div class="row">
@@ -56,11 +56,13 @@
     <span class="status" id="status"></span>
   </div>
 
-  <div class="row" id="issueBox" hidden>
+  <div class="row">
     <label>Last problem</label>
-    <div class="hint" id="issueText"></div>
-    <button id="copyIssue" class="plain">Copy details</button>
-    <button id="clearIssue" class="plain">Clear</button>
+    <div class="hint" id="issueText">None so far.</div>
+    <span id="issueButtons" hidden>
+      <button id="copyIssue" class="plain">Copy details</button>
+      <button id="clearIssue" class="plain">Clear</button>
+    </span>
   </div>
 
   <script src="options.js"></script>

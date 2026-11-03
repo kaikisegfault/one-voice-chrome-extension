@@ -65,9 +65,10 @@ async function save() {
 
 async function showIssue() {
   const { lastIssue } = await chrome.storage.local.get('lastIssue');
-  $('issueBox').hidden = !lastIssue;
-  if (!lastIssue) return;
-  $('issueText').textContent = `${new Date(lastIssue.at).toLocaleString()}: ${lastIssue.msg}`;
+  $('issueButtons').hidden = !lastIssue;
+  $('issueText').textContent = lastIssue
+    ? `${new Date(lastIssue.at).toLocaleString()}: ${lastIssue.msg}`
+    : 'None so far.';
 }
 
 $('copyIssue').addEventListener('click', async () => {

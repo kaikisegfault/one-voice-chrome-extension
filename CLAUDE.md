@@ -13,6 +13,7 @@ MV3 extension, no build step. User-facing behaviour is in `README.md`.
 ## Rules
 
 - ChatGPT controls are found by labels/text, never by CSS classes. When a step can't match, `report()` stores what it saw (buttons / HTML) as `lastIssue`; the owner sends **Copy details** from the popup.
+- No `"global": true` on commands: ChromeOS hides and ignores global extension shortcuts, and a command marked global never fires there, not even inside Chrome.
 - Raw transcript is always copied before any GPT step.
 - `parseAnswers` (content.js) splits the reply into answer 1 / 2; when the GPT uses a new shape, add it there.
 - No test suite; after changes run `node --check *.js`, then `./sync-to-chromeos.sh` and the owner reloads the extension.
