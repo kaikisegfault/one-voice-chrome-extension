@@ -35,6 +35,7 @@ async function load() {
   $('pauseMedia').checked = !!cfg.pauseMedia;
   refreshPauseMediaStatus();
   showKeys();
+  showIssue();
 }
 
 async function save() {
@@ -62,6 +63,22 @@ async function save() {
   refreshPauseMediaStatus();
 }
 
+async function showIssue() {
+  const { lastIssue } = await chrome.storage.local.get('lastIssue');
+  $('issueBox').hidden = !lastIssue;
+  if (!lastIssue) return;
+  $('issueText').textContent = `${new Date(lastIssue.at).toLocaleString()}: ${lastIssue.msg}`;
+}
+
+$('copyIssue').addEventListener('click', async () => {
+  const { lastIssue } = await chrome.storage.local.get('lastIssue');
+  await navigator.clipboard.writeText(JSON.stringify(lastIssue, null, 1));
+  $('copyIssue').textContent = 'Copied';
+});
+$('clearIssue').addEventListener('click', async () => {
+  await chrome.storage.local.remove('lastIssue');
+  showIssue();
+});
 $('save').addEventListener('click', save);
 $('pauseMedia').addEventListener('change', refreshPauseMediaStatus);
 $('shortcuts').addEventListener('click', (e) => {

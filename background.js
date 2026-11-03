@@ -1,4 +1,3 @@
-const CHATGPT_URL_PATTERNS = ['https://chatgpt.com/*', 'https://chat.openai.com/*'];
 const CHATGPT_URL_RE = /^https:\/\/(chatgpt\.com|chat\.openai\.com)\//;
 const MEDIA_URL_PATTERNS = ['*://*.youtube.com/*', '*://*.spotify.com/*'];
 const MODE_BY_COMMAND = { '1-plain': 'plain', '2-grammar': 'grammar', '3-fluent': 'fluent' };
@@ -10,52 +9,71 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // ---------- ChatGPT tab ----------
 
+function report(msg, details) {
+  console.warn('[ONE voice]', msg, details || '');
+  chrome.storage.local.set({ lastIssue: { at: Date.now(), msg, details: details || null } });
+}
+
+// The ChatGPT app window (installed web app or popup) wins over a ChatGPT tab in a normal window.
 async function findChatGPTTab() {
-  const tabs = await chrome.tabs.query({ url: CHATGPT_URL_PATTERNS });
-  if (!tabs.length) return null;
-  tabs.sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0));
-  return tabs[0];
+  const wins = await chrome.windows.getAll({ populate: true, windowTypes: ['app', 'popup', 'normal'] });
+  let best = null;
+  for (const w of wins) {
+    for (const t of w.tabs || []) {
+      if (!CHATGPT_URL_RE.test(t.url || t.pendingUrl || '')) continue;
+      const rank = (w.type === 'normal' ? 0 : 2) + (t.active ? 1 : 0);
+      if (!best || rank > best.rank || (rank === best.rank && (t.lastAccessed || 0) > (best.tab.lastAccessed || 0))) {
+        best = { tab: t, rank };
+      }
+    }
+  }
+  return best && best.tab;
 }
 
-async function openChatGPT() {
-  const win = await chrome.windows.create({ url: 'https://chatgpt.com/', focused: true });
-  return win.tabs[0];
-}
-
-async function focusChatGPT(tab) {
+async function rememberBounds(windowId) {
   try {
-    await chrome.windows.update(tab.windowId, { focused: true, state: 'normal' });
-    await chrome.tabs.update(tab.id, { active: true });
+    const w = await chrome.windows.get(windowId);
+    if (w.state === 'normal') {
+      await chrome.storage.local.set({ windowBounds: { left: w.left, top: w.top, width: w.width, height: w.height } });
+    }
   } catch (e) {}
 }
 
-async function minimizeWindow(windowId) {
-  try { await chrome.windows.update(windowId, { state: 'minimized' }); } catch (e) {}
+// Closed: reopen as a small app-like window where the last one was.
+async function openChatGPT() {
+  const { windowBounds } = await chrome.storage.local.get('windowBounds');
+  const win = await chrome.windows.create({
+    url: 'https://chatgpt.com/', type: 'popup', focused: true, ...(windowBounds || { width: 500, height: 900 })
+  });
+  return win.tabs[0];
 }
 
-// Wait until the page is loaded and its manifest content script answers.
-async function waitForTabReady(tabId, ms = 20000) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    const t = await chrome.tabs.get(tabId).catch(() => null);
-    if (!t) return false;
-    if (t.status === 'complete' && CHATGPT_URL_RE.test(t.url || '')) {
-      try { await chrome.tabs.sendMessage(tabId, { type: 'status' }); return true; } catch (e) {}
-    }
-    await sleep(250);
-  }
-  return false;
-}
-
-// Message the content script; inject it if nobody answers (tab open from before an extension reload).
-async function ask(tabId, msg) {
-  try { return await chrome.tabs.sendMessage(tabId, msg); } catch (e) {}
+// Minimized: restore. Behind other windows: raise. Size and position stay as they are.
+async function bringToFront(tab) {
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
-    return await chrome.tabs.sendMessage(tabId, msg);
-  } catch (e) {
-    console.warn('[ONE voice] content script unreachable:', e.message);
-    return null;
+    const w = await chrome.windows.get(tab.windowId);
+    await chrome.windows.update(tab.windowId, w.state === 'minimized' ? { state: 'normal', focused: true } : { focused: true });
+    if (!tab.active) await chrome.tabs.update(tab.id, { active: true });
+  } catch (e) {}
+  rememberBounds(tab.windowId);
+}
+
+// Message the content script; inject it when nobody answers (tab open from before install or reload).
+// A fresh window gets a few seconds to load first.
+async function ask(tabId, msg, waitMs = 0) {
+  const end = Date.now() + waitMs;
+  for (;;) {
+    try {
+      const res = await chrome.tabs.sendMessage(tabId, msg);
+      if (res) return res;
+    } catch (e) {}
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+      const res = await chrome.tabs.sendMessage(tabId, msg);
+      if (res) return res;
+    } catch (e) {}
+    if (Date.now() >= end) return null;
+    await sleep(300);
   }
 }
 
@@ -73,15 +91,13 @@ async function onHotkey(mode) {
   let tab = await findChatGPTTab();
   const fresh = !tab;
   if (fresh) tab = await openChatGPT();
-  else await focusChatGPT(tab);
+  else await bringToFront(tab);
 
-  if ((fresh || tab.status !== 'complete') && !(await waitForTabReady(tab.id))) {
-    console.warn('[ONE voice] ChatGPT tab did not load');
+  const status = await ask(tab.id, { type: 'status' }, fresh ? 20000 : 3000);
+  if (!status) {
+    report('ChatGPT page did not answer', tab.url || tab.pendingUrl || '');
     return;
   }
-
-  const status = await ask(tab.id, { type: 'status' });
-  if (!status) return;
 
   if (status.state === 'idle') {
     const [, res] = await Promise.all([pauseMediaTabs(), ask(tab.id, { type: 'start', mode })]);
@@ -199,10 +215,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     writeClipboard(String(msg.text || '')).then(ok => sendResponse({ ok }));
     return true;
   }
-  if (msg.type === 'done' && sender.tab) {
-    resumeMediaTabs();
-    minimizeWindow(sender.tab.windowId);
-  }
+  if (msg.type === 'done') resumeMediaTabs();
 });
 
 chrome.runtime.onInstalled.addListener(async () => {

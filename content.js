@@ -1,7 +1,16 @@
 (() => {
-  // Every injection takes over; an older copy (e.g. left behind by an extension reload) goes quiet.
-  const GEN = (window.__oneVoiceGen = (window.__oneVoiceGen || 0) + 1);
-  const live = () => window.__oneVoiceGen === GEN;
+  // One live copy per page. A copy orphaned by an extension reload doesn't answer, so a new one starts.
+  const PING = 'one-voice-ping-' + chrome.runtime.id;
+  const root = document.documentElement;
+  root.removeAttribute('data-one-voice-alive');
+  document.dispatchEvent(new Event(PING));
+  const taken = root.hasAttribute('data-one-voice-alive');
+  root.removeAttribute('data-one-voice-alive');
+  if (taken) return;
+  document.addEventListener(PING, () => {
+    try { if (chrome.runtime.id) root.setAttribute('data-one-voice-alive', ''); } catch (e) {}
+  });
+
   const LOG = '[ONE voice]';
 
   const S = {
@@ -11,6 +20,9 @@
     preText: '',
     startedAt: 0,
     maxTimer: null,
+    scope: null,        // composer area, kept from before recording (the input is swapped out while recording)
+    idleSigs: new Set(), // buttons there before recording
+    trailing: null,     // rect of the send / voice button at the far right, never the stop button
     cfg: { maxDuration: 600, mention: '@grammar' }
   };
 
@@ -20,24 +32,20 @@
 
   const MIC_POSITIVE = [
     'dictate', 'dictation', 'transcrib',
-    'start voice message', 'stop voice message',
-    'start recording', 'stop recording'
+    'start voice message', 'start recording'
   ];
   const MIC_NEGATIVE = [
     'voice mode', 'voice chat', 'voice conversation',
     'end voice', 'advanced voice', 'live voice',
     'speech mode', 'headphones'
   ];
-  const CONFIRM_POSITIVE = [
-    'send voice', 'submit voice',
-    'confirm voice', 'confirm recording',
-    'finish recording', 'done recording', 'send recording',
-    'submit', 'confirm', 'done', 'finish'
+  // Recording bar: [✕ cancel] ~~~waveform~~~ [■ stop → text into the input] [↑ transcribe and send].
+  const STOP_NEGATIVE = [
+    'cancel', 'discard', 'delete', 'close', 'abort', 'trash', 'remove', 'dismiss',
+    'send', 'voice mode', 'voice chat', 'stop streaming', 'stop generating',
+    'add', 'attach', 'upload', 'model', 'tools'
   ];
-  const CONFIRM_NEGATIVE = [
-    'cancel', 'discard', 'delete', 'close',
-    'stop recording', 'abort', 'trash', 'remove'
-  ];
+  const STOP_POSITIVE = /\bstop\b|done|finish|confirm|submit|complete|check|tick/;
   const COMPOSER_SELECTORS = [
     '#prompt-textarea',
     'div[contenteditable="true"][data-id="root"]',
@@ -70,8 +78,22 @@
     const label = (btn.getAttribute('aria-label') || '').toLowerCase();
     const testid = (btn.getAttribute('data-testid') || '').toLowerCase();
     const title = (btn.getAttribute('title') || '').toLowerCase();
-    const text = (btn.innerText || btn.textContent || '').toLowerCase();
+    const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
     return `${label} | ${testid} | ${title} | ${text}`;
+  }
+
+  // Identifiers plus the icon, so unlabeled icon buttons can be told apart.
+  function buttonSig(btn) {
+    const svg = btn.querySelector('svg');
+    const icon = svg ? (svg.querySelector('use')?.getAttribute('href') || svg.querySelector('path')?.getAttribute('d') || '').slice(0, 60) : '';
+    return `${buttonIdentifiers(btn)} | ${icon}`;
+  }
+
+  function describeButtons(scope) {
+    return Array.from(scope.querySelectorAll('button')).filter(visible).map(b => {
+      const r = b.getBoundingClientRect();
+      return `${buttonSig(b)} @${Math.round(r.left)},${Math.round(r.top)}`;
+    });
   }
 
   function composerScope() {
@@ -80,41 +102,54 @@
     return composer.closest('form') || composer.parentElement?.closest('div') || document;
   }
 
-  function rankButtons(positives, negatives, bonus) {
-    const buttons = Array.from(composerScope().querySelectorAll('button'));
-    const ranked = [];
+  function findMic() {
+    const buttons = Array.from(composerScope().querySelectorAll('button')).filter(visible);
+    let best = null;
     for (const btn of buttons) {
       const ident = buttonIdentifiers(btn);
-      if (!ident.trim() || negatives.some(n => ident.includes(n))) continue;
+      if (MIC_NEGATIVE.some(n => ident.includes(n))) continue;
       let score = 0;
-      for (const p of positives) if (ident.includes(p)) score += 10;
-      score += bonus(btn, ident);
-      if (score > 0) ranked.push({ btn, score, ident });
+      for (const p of MIC_POSITIVE) if (ident.includes(p)) score += 10;
+      if (/\bmic\b|microphone|\brecord\b/.test(ident)) score += 5;
+      if (score && (!best || score > best.score)) best = { btn, score };
     }
-    ranked.sort((a, b) => b.score - a.score);
-    return { best: ranked[0], buttons };
+    return best ? best.btn : null;
   }
 
-  function findMic(quiet) {
-    const { best, buttons } = rankButtons(MIC_POSITIVE, MIC_NEGATIVE,
-      (btn, ident) => (/\bmic\b|microphone|\brecord\b/.test(ident) ? 5 : 0));
-    if (best) return best.btn;
-    if (!quiet) console.warn(LOG, 'mic not matched. Buttons:', buttons.map(buttonIdentifiers).filter(x => x.trim()));
-    return null;
+  // Remember the composer area before recording starts, to find the stop button later.
+  function rememberIdleLayout() {
+    S.scope = composerScope();
+    const buttons = Array.from(S.scope.querySelectorAll('button')).filter(visible);
+    S.idleSigs = new Set(buttons.map(buttonSig));
+    let right = null;
+    for (const b of buttons) {
+      const r = b.getBoundingClientRect();
+      if (!right || r.right > right.right) right = r;
+    }
+    S.trailing = right && right.width ? { x: right.left + right.width / 2, y: right.top + right.height / 2 } : null;
   }
 
-  function findConfirm() {
-    const { best, buttons } = rankButtons(CONFIRM_POSITIVE, CONFIRM_NEGATIVE, (btn, ident) => {
-      let s = /check|tick/.test(ident) ? 5 : 0;
-      for (const svg of btn.querySelectorAll('svg')) {
-        const n = (svg.getAttribute('aria-label') || svg.getAttribute('data-icon') || '').toLowerCase();
-        if (n.includes('check') || n.includes('tick')) s += 3;
-      }
-      return s;
-    });
-    if (best) return best.btn;
-    console.warn(LOG, 'confirm not matched. Buttons:', buttons.map(buttonIdentifiers).filter(x => x.trim()));
-    return null;
+  // The ■ button: not cancel, not send, not at the send button's spot; labelled stop/done or new since
+  // recording started; the rightmost wins (✕ is at the left end).
+  function findStop() {
+    const inScope = S.scope && S.scope.isConnected && S.scope !== document;
+    const scope = inScope ? S.scope : composerScope();
+    const ranked = [];
+    for (const btn of Array.from(scope.querySelectorAll('button')).filter(visible)) {
+      const ident = buttonIdentifiers(btn);
+      if (STOP_NEGATIVE.some(n => ident.includes(n))) continue;
+      const r = btn.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      if (S.trailing && Math.abs(cx - S.trailing.x) < 8 && Math.abs(cy - S.trailing.y) < 8) continue;
+      let score = STOP_POSITIVE.test(ident) ? 10 : 0;
+      if (inScope && !S.idleSigs.has(buttonSig(btn))) score += 5;
+      if (score) ranked.push({ btn, score, right: r.right, sig: buttonSig(btn) });
+    }
+    ranked.sort((a, b) => b.score - a.score || b.right - a.right);
+    if (!ranked.length) return null;
+    console.log(LOG, 'stop →', ranked[0].sig);
+    return ranked[0].btn;
   }
 
   // ---------- Small helpers ----------
@@ -122,7 +157,7 @@
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
   function check(run) {
-    if (run !== S.run || !live()) throw new Cancelled();
+    if (run !== S.run) throw new Cancelled();
   }
 
   async function waitFor(fn, ms, step, run) {
@@ -134,6 +169,20 @@
       if (Date.now() >= end) return null;
       await sleep(step);
     }
+  }
+
+  // Last problem, shown in the extension popup so it can be copied without DevTools.
+  function report(msg, details) {
+    console.warn(LOG, msg, details || '');
+    try {
+      chrome.storage.local.set({ lastIssue: { at: Date.now(), msg, details: details || null, url: location.href } });
+    } catch (e) {}
+  }
+
+  function fail(msg, details) {
+    const e = new Error(msg);
+    e.details = details;
+    return e;
   }
 
   function send(type, payload = {}) {
@@ -327,19 +376,26 @@
   function findMentionOption(query) {
     const heading = popupTexts(t => t.trim().toLowerCase() === 'custom gpts')[0];
     if (!heading) return null;
-    const hit = popupTexts(t => t.toLowerCase().includes(query))
-      .find(el => heading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const hits = popupTexts(t => t.toLowerCase().includes(query))
+      .filter(el => heading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+    // The closest one: the nearest ancestor of the heading that also holds a match is the list itself.
+    let hit = null;
+    for (let box = heading.parentElement; box && !hit; box = box.parentElement) {
+      hit = hits.find(el => box.contains(el)) || null;
+    }
     if (!hit) return null;
     const row = hit.closest('[role="option"], [role="menuitem"], button, a, li, [tabindex]');
     return { heading, row: row && !row.contains(heading) ? row : hit };
   }
 
-  function dumpMentionPopup(query, why) {
+  function mentionDetails(query) {
     const hits = popupTexts(t => t.toLowerCase().includes(query) || /custom gpts|plugins/i.test(t));
     let box = hits[0];
     for (let i = 0; box && i < 6; i++) box = box.parentElement;
-    console.warn(LOG, `${why} — send this line to fix it. Matches:`, hits.map(el => el.outerHTML.slice(0, 300)),
-      'Popup:', (box ? box.outerHTML : '(no popup found)').slice(0, 6000));
+    return {
+      matches: hits.map(el => el.outerHTML.slice(0, 300)),
+      popup: (box ? box.outerHTML : '(no popup found)').slice(0, 6000)
+    };
   }
 
   async function selectMention(composer, run) {
@@ -350,15 +406,11 @@
     await sleep(60);
     typeText(composer, mention.slice(1));
     const found = await waitFor(() => findMentionOption(query), 5000, 100, run);
-    if (!found) {
-      dumpMentionPopup(query, `"${mention}" not found under Custom GPTs`);
-      throw new Error('GPT not found in the @ list');
-    }
+    if (!found) throw fail(`"${mention}" not found under Custom GPTs`, mentionDetails(query));
     await realisticClick(found.row, { focus: false });
     const closed = await waitFor(() => !visible(found.heading), 1500, 100, run);
     if (!closed || composerText().trim() === mention) {
-      dumpMentionPopup(query, 'clicking the GPT row did not select it');
-      throw new Error('could not select the GPT');
+      throw fail('clicking the GPT row did not select it', mentionDetails(query));
     }
   }
 
@@ -393,11 +445,13 @@
     typeText(findComposer() || composer, (cur.trim() && !/\s$/.test(cur) ? ' ' : '') + text);
 
     const sendBtn = await waitFor(() => { const b = findSend(); return b && !b.disabled ? b : null; }, 3000, 100, run);
-    if (!sendBtn) throw new Error('send button not ready');
+    if (!sendBtn) throw fail('send button not ready', describeButtons(composerScope()));
     const seenUser = snapshot('user');
     const seenBot = snapshot('assistant');
     await realisticClick(sendBtn);
-    if (!(await waitFor(() => newest('user', seenUser), 5000, 100, run))) throw new Error('message was not sent');
+    if (!(await waitFor(() => newest('user', seenUser), 5000, 100, run))) {
+      throw fail('message was not sent', describeButtons(composerScope()));
+    }
     return waitForReply(seenBot, run);
   }
 
@@ -429,12 +483,12 @@
         stable = 0;
       }
     }
-    throw new Error('no transcription captured');
+    throw fail('no transcription arrived in the input', describeButtons(S.scope && S.scope.isConnected ? S.scope : document));
   }
 
   function finish(run, err) {
     if (err instanceof Cancelled || run !== S.run) return;
-    if (err) console.warn(LOG, err.message);
+    if (err) report(err.message, err.details);
     clearTimeout(S.maxTimer);
     S.state = 'idle';
     send('done');
@@ -446,12 +500,10 @@
     S.mode = mode;
     try {
       await loadConfig();
-      const mic = await waitFor(() => findMic(true), 10000, 200, run);
-      if (!mic) {
-        findMic(false);
-        throw new Error('start aborted: no mic button');
-      }
+      const mic = await waitFor(findMic, 10000, 200, run);
+      if (!mic) throw fail('mic button not found', describeButtons(composerScope()));
       S.preText = composerText();
+      rememberIdleLayout();
       await realisticClick(mic);
       check(run);
       S.state = 'recording';
@@ -472,9 +524,12 @@
     clearTimeout(S.maxTimer);
     S.state = 'processing';
     try {
-      const confirm = findConfirm();
-      if (!confirm) throw new Error('recording was cancelled by ChatGPT (no ✓ button)');
-      await realisticClick(confirm);
+      const stopBtn = await waitFor(findStop, 1500, 100, run);
+      if (!stopBtn) {
+        throw fail('stop button not found (or ChatGPT cancelled the recording)',
+          describeButtons(S.scope && S.scope.isConnected ? S.scope : document));
+      }
+      await realisticClick(stopBtn);
       const text = await waitForTranscript(run, (Date.now() - S.startedAt) / 1000);
 
       // Raw text first, so a failed GPT step still leaves you the dictation.
@@ -487,7 +542,7 @@
         const n = mode === 'grammar' ? 1 : 2;
         let result = pickVersion(body, n);
         if (!result) {
-          console.warn(LOG, `answer ${n} not found, copying the whole reply`);
+          report(`answer ${n} not found, copied the whole reply`, body.outerHTML.slice(0, 6000));
           result = (body.innerText || '').trim();
         }
         if (result) await copy(result);
@@ -507,7 +562,7 @@
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (!live() || !msg || msg.target === 'offscreen') return;
+    if (!msg || msg.target === 'offscreen') return;
     switch (msg.type) {
       case 'status':
         sendResponse({ state: S.state });
