@@ -2,7 +2,7 @@
 
 Global-hotkey voice-to-text through ChatGPT's own browser dictation. Press a hotkey, speak, press again — the result lands in your clipboard. No API keys, no OpenAI bill: it drives the ChatGPT page you're already logged in to.
 
-Companion to [`explorills/one-voice`](https://github.com/explorills/one-voice) (the VS Code / Whisper-API edition).
+Companion to [`kaikisegfault/one-voice`](https://github.com/kaikisegfault/one-voice) (the VS Code / Whisper-API edition).
 
 ## Three modes
 
@@ -21,7 +21,7 @@ The GPT must answer in the shape `1) corrected … 2) fluent …` — e.g. [Gram
 
 ## Install (unpacked)
 
-1. `git clone https://github.com/explorills/one-voice-chrome-extension.git`
+1. `git clone https://github.com/kaikisegfault/one-voice-chrome-extension.git`
 2. `chrome://extensions/` → switch on **Developer mode** (the switch on that page, top right).
 3. **Load unpacked** → pick the folder that holds `manifest.json`.
 4. Check the keys at `chrome://extensions/shortcuts`. Chrome leaves a default key unset if another extension already uses it.
