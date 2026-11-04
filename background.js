@@ -80,7 +80,7 @@ async function ask(tabId, msg, waitMs = 0) {
 // ---------- Notifications: recording time, working, copied (visible over every window) ----------
 
 // Each step gets a new notification, so it pops up again even if ChromeOS has already tucked the
-// previous one into the tray; the title's timer updates in place.
+// previous one into the tray. Only Recording has a timer, updated in place.
 let noteId = null;
 let noteSeq = 0;
 let tick = null;
@@ -154,7 +154,7 @@ chrome.commands.onCommand.addListener((command) => {
 
 async function onHotkey(mode) {
   const { tab, fresh } = await ownChatGPTTab();
-  if (fresh) notify('Opening ChatGPT…', 'In a minimized window of its own; recording starts when it has loaded.', { timer: true });
+  if (fresh) notify('Opening ChatGPT…', 'In a minimized window of its own; recording starts when it has loaded.');
   // Left as it is (minimized works); brought forward only if the setting says so.
   if ((await chrome.storage.sync.get({ raiseWindow: false })).raiseWindow) await bringToFront(tab);
 
@@ -288,8 +288,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'progress') {
     stopTick();
     if (sender.tab && !pacer) startPacer(sender.tab.id);  // auto-stop at max duration
-    if (msg.step === 'transcribing') notify('Transcribing…', 'Your words go to the clipboard first.', { timer: true });
-    if (msg.step === 'answer') notify('GPT is writing the answer…', 'Your words are already in the clipboard.', { timer: true });
+    if (msg.step === 'transcribing') notify('Transcribing…', 'Your words go to the clipboard first.');
+    if (msg.step === 'answer') notify('GPT is writing the answer…', 'Your words are already in the clipboard.');
   }
   if (msg.type === 'done') {
     stopPacer();

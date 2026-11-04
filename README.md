@@ -14,7 +14,7 @@ Companion to [`kaikisegfault/one-voice`](https://github.com/kaikisegfault/one-vo
 - Press either key to start; the key you **stop** with decides the mode. So you can start talking and decide at the end.
 - Grammar: after you stop, the extension types `@grammar` in ChatGPT, picks the GPT listed under **Custom GPTs** (not Plugins), adds your words, sends, waits until the new answer is complete and presses the Copy of the last answer in the chat (the one next to 👍 👎, never the one next to Edit on your message). The raw text is copied first, so if anything fails you still have your dictation.
 - Pressing a key while it's waiting for the answer cancels.
-- A notification stays up through the whole run, each step with its own timer: **● Recording**, **Transcribing…**, **GPT is writing the answer…**, then **✓ Copied** (or what failed). It's visible over every window. Clicking it shows the extension's ChatGPT window.
+- A notification stays up through the whole run, one per step: **● Recording** (with its timer), **Transcribing…**, **GPT is writing the answer…**, then **✓ Copied** (or what failed). It's visible over every window. Clicking it shows the extension's ChatGPT window.
 - The extension uses a ChatGPT window of its own: opened minimized on the first press (and again if you close it), then left alone. Your own ChatGPT app or tabs are never touched. (Setting **Bring ChatGPT to the front on each press** restores / raises it.)
 - In the recording bar `✕ ~~~ ■ ↑` the stop press clicks **■** (text into the input, nothing sent yet), never ✕ or ↑.
 - The keys work while any Chrome window has focus: browser tabs, the ChatGPT app window, other installed web apps. ChromeOS doesn't offer **Global** extension shortcuts (Chrome hides that scope and ignores it there), so Linux apps such as VS Code can't trigger them. From a Linux app: pin ChatGPT to the shelf and press `Alt+<its shelf position>` to bring it forward, then the mode key.
@@ -75,7 +75,7 @@ What the extension keeps: your settings (synced with your Google account), and i
 
 - Makes no network requests of its own; your audio goes to OpenAI exactly as when you click the mic yourself.
 - Host access: `chatgpt.com` and `chat.openai.com` only, plus `*.youtube.com` / `*.spotify.com` only if you switch on media pausing (switching it off removes them).
-- Permissions: `storage` (settings, Last problem), `notifications` (recording / copied), `scripting` + `tabs` (find and raise the ChatGPT window), `alarms` (media safety-resume), `offscreen` + `clipboardWrite` (copy even when the ChatGPT window has no focus). A small page script (`page-hook.js`) only reports the text ChatGPT's Copy button writes.
+- Permissions: `storage` (settings, Last problem), `notifications` (recording / copied), `scripting` + `tabs` (find and raise the ChatGPT window), `alarms` (media safety-resume), `offscreen` + `clipboardWrite` (copy even when the ChatGPT window has no focus). A small page script (`page-hook.js`) reports the text ChatGPT's Copy button writes; when the extension presses Copy it skips the page's own write (which would fail without focus and show "couldn't copy").
 
 ## License
 

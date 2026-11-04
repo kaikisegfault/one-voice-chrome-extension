@@ -451,6 +451,7 @@
   async function copyReply(found, run) {
     let caught = null;
     catcher = (t) => { caught = t; };
+    window.postMessage({ __oneVoice: 'arm' }, '*');  // page-hook.js: report this copy, skip the page's own write
     try {
       await realisticClick(found.btn);
       await waitFor(() => caught !== null, 1500, 50, run);
