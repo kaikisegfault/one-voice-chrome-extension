@@ -14,8 +14,8 @@ Companion to [`kaikisegfault/one-voice`](https://github.com/kaikisegfault/one-vo
 - Press either key to start; the key you **stop** with decides the mode. So you can start talking and decide at the end.
 - Grammar: after you stop, the extension types `@grammar` in ChatGPT, picks the GPT listed under **Custom GPTs** (not Plugins), adds your words, sends, waits until the new answer is complete and presses the Copy of the last answer in the chat (the one next to 👍 👎, never the one next to Edit on your message). The raw text is copied first, so if anything fails you still have your dictation.
 - Pressing a key while it's waiting for the answer cancels.
-- A notification shows the recording time, then **✓ Copied** when the clipboard is ready. It's visible over every window, so you can minimize ChatGPT right after the stop press. Clicking it brings ChatGPT forward.
-- Every press brings the ChatGPT app window into view: restored if minimized, raised if behind. Its size and position stay; nothing minimizes it. If it's closed, a notification asks you to open it (Chrome lets only Web Store extensions launch an installed app), so keep it open or minimized.
+- A notification shows the recording time, then **✓ Copied** when the clipboard is ready. It's visible over every window. Clicking it brings ChatGPT forward.
+- The ChatGPT app window is left as it is: it can stay minimized all the time; the notifications show what's happening. (Setting **Bring ChatGPT to the front on each press** restores / raises it instead.) If it's closed, a notification asks you to open it (Chrome lets only Web Store extensions launch an installed app).
 - In the recording bar `✕ ~~~ ■ ↑` the stop press clicks **■** (text into the input, nothing sent yet), never ✕ or ↑.
 - The keys work while any Chrome window has focus: browser tabs, the ChatGPT app window, other installed web apps. ChromeOS doesn't offer **Global** extension shortcuts (Chrome hides that scope and ignores it there), so Linux apps such as VS Code can't trigger them. From a Linux app: pin ChatGPT to the shelf and press `Alt+<its shelf position>` to bring it forward, then the mode key.
 - Change keys at `chrome://extensions/shortcuts`.
@@ -52,6 +52,7 @@ Extension icon → popup:
 
 - **GPT to mention** *(default `@grammar`)* — what Grammar types in ChatGPT.
 - **Max recording duration** *(default 600 s, 10–3600)* — auto-stops at this limit, in the mode you started with.
+- **Bring ChatGPT to the front on each press** *(default off)* — off leaves the window alone, minimized or not.
 - **Notifications** *(default on)* — recording time, "Transcribing…", "Waiting for the GPT answer…", then "✓ Copied" (or what failed).
 - **Pause YouTube / Spotify during recording** *(default off)* — pauses playing YouTube, YouTube Music and Spotify web tabs on start, resumes on the stop press. Asks for access to those two sites only. Can't reach native Android apps or Bluetooth audio.
 - **Last problem** — when a step fails, the popup shows what went wrong; **Copy details** copies the buttons / HTML it saw, which is what's needed to fix a matcher.

@@ -155,7 +155,13 @@
 
   // ---------- Small helpers ----------
 
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  // Wakes early on a 'tick' from the background: a minimized page's own timers run slowly.
+  const sleepers = new Set();
+  const sleep = (ms) => new Promise(r => {
+    const wake = () => { clearTimeout(t); sleepers.delete(wake); r(); };
+    const t = setTimeout(wake, ms);
+    sleepers.add(wake);
+  });
 
   function check(run) {
     if (run !== S.run) throw new Cancelled();
@@ -591,6 +597,10 @@
     switch (msg.type) {
       case 'status':
         sendResponse({ state: S.state });
+        return;
+      case 'tick':
+        for (const wake of Array.from(sleepers)) wake();
+        sendResponse({});
         return;
       case 'start':
         start(msg.mode).then(ok => sendResponse({ ok }));

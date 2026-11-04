@@ -1,7 +1,7 @@
 const CHATGPT_URL_RE = /^https:\/\/(chatgpt\.com|chat\.openai\.com)\//;
 const MEDIA_URL_PATTERNS = ['*://*.youtube.com/*', '*://*.spotify.com/*'];
 const MODE_BY_COMMAND = { '1-plain': 'plain', '2-grammar': 'grammar' };
-const DEFAULTS = { maxDuration: 600, pauseMedia: false, mention: '@grammar', notify: true };
+const DEFAULTS = { maxDuration: 600, pauseMedia: false, mention: '@grammar', notify: true, raiseWindow: false };
 const PAUSED_IDS_KEY = 'pausedTabIds';
 const SAFETY_RESUME_MS = 15 * 60 * 1000;
 
@@ -37,6 +37,25 @@ async function bringToFront(tab) {
     await chrome.windows.update(tab.windowId, w.state === 'minimized' ? { state: 'normal', focused: true } : { focused: true });
     if (!tab.active) await chrome.tabs.update(tab.id, { active: true });
   } catch (e) {}
+}
+
+// A minimized ChatGPT page gets its timers slowed to once a second, and to once a minute after
+// 5 minutes. While a step runs, wake it 4x a second; messages aren't slowed.
+let pacer = null;
+let pacerEnd = 0;
+
+function startPacer(tabId) {
+  stopPacer();
+  pacerEnd = Date.now() + 5 * 60 * 1000;
+  pacer = setInterval(() => {
+    if (Date.now() > pacerEnd) return stopPacer();
+    chrome.tabs.sendMessage(tabId, { type: 'tick' }).catch(() => {});
+  }, 250);
+}
+
+function stopPacer() {
+  clearInterval(pacer);
+  pacer = null;
 }
 
 // Message the content script; inject it when nobody answers (tab open from before install or reload).
@@ -129,7 +148,10 @@ async function onHotkey(mode) {
     report('ChatGPT app is closed');
     return;
   }
-  await bringToFront(tab);
+  // Left as it is (minimized works); brought forward only if the setting says so.
+  if ((await chrome.storage.sync.get({ raiseWindow: false })).raiseWindow) await bringToFront(tab);
+  // Memory Saver must not unload a ChatGPT app that stays minimized.
+  if (tab.autoDiscardable !== false) chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
 
   const status = await ask(tab.id, { type: 'status' }, 3000);
   if (!status) {
@@ -138,12 +160,15 @@ async function onHotkey(mode) {
   }
 
   if (status.state === 'idle') {
+    startPacer(tab.id);
     const [, res] = await Promise.all([pauseMediaTabs(), ask(tab.id, { type: 'start', mode })]);
+    stopPacer();
     if (res && res.ok) noteRecording();
     else await resumeMediaTabs();
   } else if (status.state === 'recording') {
     stopTick();
     resumeMediaTabs();
+    startPacer(tab.id);
     await ask(tab.id, { type: 'stop', mode });
   } else {
     // Still starting, or waiting for the transcription / GPT answer: a press cancels.
@@ -257,10 +282,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === 'progress') {
     stopTick();
+    if (sender.tab && !pacer) startPacer(sender.tab.id);  // auto-stop at max duration
     if (msg.step === 'transcribing') notify('Transcribing…', 'Your words go to the clipboard first.', { sticky: true });
     if (msg.step === 'answer') notify('Waiting for the GPT answer…', 'Your words are already in the clipboard.', { sticky: true });
   }
   if (msg.type === 'done') {
+    stopPacer();
     resumeMediaTabs();
     noteDone(msg);
   }
