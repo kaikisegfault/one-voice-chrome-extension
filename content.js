@@ -534,7 +534,7 @@
     S.mode = mode;
     try {
       await loadConfig();
-      const mic = await waitFor(findMic, 10000, 200, run);
+      const mic = await waitFor(findMic, 20000, 200, run);  // a freshly opened window is still loading
       if (!mic) throw fail('mic button not found', describeButtons(composerScope()));
       S.preText = composerText();
       rememberIdleLayout();

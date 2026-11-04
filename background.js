@@ -14,20 +14,19 @@ function report(msg, details) {
   chrome.storage.local.set({ lastIssue: { at: Date.now(), msg, details: details || null } });
 }
 
-// The installed ChatGPT app window wins over a popup window, which wins over a ChatGPT tab.
-async function findChatGPTTab() {
-  const wins = await chrome.windows.getAll({ populate: true, windowTypes: ['app', 'popup', 'normal'] });
-  let best = null;
-  for (const w of wins) {
-    for (const t of w.tabs || []) {
-      if (!CHATGPT_URL_RE.test(t.url || t.pendingUrl || '')) continue;
-      const rank = ({ app: 4, popup: 2 }[w.type] || 0) + (t.active ? 1 : 0);
-      if (!best || rank > best.rank || (rank === best.rank && (t.lastAccessed || 0) > (best.tab.lastAccessed || 0))) {
-        best = { tab: t, rank };
-      }
-    }
+// The extension's own ChatGPT window: opened minimized when missing, then reused. Your own
+// ChatGPT windows and tabs are never touched.
+async function ownChatGPTTab() {
+  const { ownTabId } = await chrome.storage.session.get('ownTabId');
+  if (ownTabId) {
+    const t = await chrome.tabs.get(ownTabId).catch(() => null);
+    if (t && CHATGPT_URL_RE.test(t.url || t.pendingUrl || '')) return { tab: t, fresh: false };
   }
-  return best && best.tab;
+  const win = await chrome.windows.create({ url: 'https://chatgpt.com/', type: 'popup', state: 'minimized' });
+  const tab = win.tabs[0];
+  await chrome.storage.session.set({ ownTabId: tab.id });
+  chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});  // Memory Saver keeps it loaded
+  return { tab, fresh: true };
 }
 
 // Minimized: restore. Behind other windows: raise. Size and position stay as they are.
@@ -80,7 +79,10 @@ async function ask(tabId, msg, waitMs = 0) {
 
 // ---------- Notifications: recording time, working, copied (visible over every window) ----------
 
-const NOTE = 'one-voice';
+// Each step gets a new notification, so it pops up again even if ChromeOS has already tucked the
+// previous one into the tray; the title's timer updates in place.
+let noteId = null;
+let noteSeq = 0;
 let tick = null;
 let closeTimer = null;
 
@@ -89,42 +91,54 @@ function stopTick() {
   tick = null;
 }
 
-async function notify(title, message, { sticky = false, autoClose = 0, force = false } = {}) {
-  if (!force && !(await chrome.storage.sync.get({ notify: true })).notify) return false;
+const clock = (ms) => {
+  const sec = Math.floor(ms / 1000);
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+};
+
+// One at a time, in order: two steps arriving together must not leave a stale notification behind.
+let noteQueue = Promise.resolve();
+
+function notify(...args) {
+  noteQueue = noteQueue.then(() => showNote(...args)).catch(e => console.warn('[ONE voice]', e));
+  return noteQueue;
+}
+
+async function showNote(title, message, { timer = false, autoClose = 0, force = false } = {}) {
+  stopTick();
   clearTimeout(closeTimer);
-  await chrome.notifications.create(NOTE, {
-    type: 'basic', iconUrl: 'icons/icon-128.png', title, message: message || ' ',
-    silent: true, requireInteraction: sticky, priority: 1
+  if (!force && !(await chrome.storage.sync.get({ notify: true })).notify) return;
+  if (noteId) chrome.notifications.clear(noteId);
+  const id = noteId = `one-voice-${++noteSeq}`;
+  const t0 = Date.now();
+  const titleNow = () => (timer ? `${title} ${clock(Date.now() - t0)}` : title);
+  await chrome.notifications.create(id, {
+    type: 'basic', iconUrl: 'icons/icon-128.png', title: titleNow(), message: message || ' ',
+    silent: true, requireInteraction: true, priority: 2
   });
-  if (autoClose) closeTimer = setTimeout(() => chrome.notifications.clear(NOTE), autoClose);
-  return true;
+  if (timer) tick = setInterval(() => chrome.notifications.update(id, { title: titleNow() }), 1000);
+  if (autoClose) closeTimer = setTimeout(() => chrome.notifications.clear(id), autoClose);
 }
 
 async function noteRecording() {
   const keys = Object.fromEntries((await chrome.commands.getAll()).map(c => [c.name, c.shortcut || 'its key']));
-  const t0 = Date.now();
-  const title = () => {
-    const sec = Math.floor((Date.now() - t0) / 1000);
-    return `● Recording ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
-  };
-  stopTick();
-  const shown = await notify(title(), `Stop: ${keys['1-plain']} your words · ${keys['2-grammar']} GPT answer`, { sticky: true });
-  if (shown) tick = setInterval(() => chrome.notifications.update(NOTE, { title: title() }), 1000);
+  notify('● Recording', `Stop: ${keys['1-plain']} your words · ${keys['2-grammar']} GPT answer`, { timer: true });
 }
 
 function noteDone(msg) {
-  stopTick();
   const r = msg.result;
-  if (msg.cancelled) return notify('Cancelled', 'Nothing more will be copied.', { autoClose: 3000 });
-  if (r && r.kind === 'answer') return notify('✓ Copied: GPT answer', `${r.chars} characters · paste with Ctrl+V`, { autoClose: 5000 });
-  if (r && !msg.error) return notify('✓ Copied: your words', `${r.chars} characters · paste with Ctrl+V`, { autoClose: 5000 });
-  if (r) return notify('Copied your words only', `${msg.error}. Details: extension popup.`, { autoClose: 8000 });
-  return notify('Nothing copied', `${msg.error || 'Something went wrong'}. Details: extension popup.`, { autoClose: 8000 });
+  if (msg.cancelled) return notify('Cancelled', 'Nothing more will be copied.', { autoClose: 4000 });
+  if (r && r.kind === 'answer') return notify('✓ Copied: GPT answer', `${r.chars} characters · paste with Ctrl+V`, { autoClose: 8000 });
+  if (r && !msg.error) return notify('✓ Copied: your words', `${r.chars} characters · paste with Ctrl+V`, { autoClose: 8000 });
+  if (r) return notify('Copied your words only', `${msg.error}. Details: extension popup.`, { autoClose: 12000 });
+  return notify('Nothing copied', `${msg.error || 'Something went wrong'}. Details: extension popup.`, { autoClose: 12000 });
 }
 
+// Clicking a notification shows the extension's ChatGPT window.
 chrome.notifications.onClicked.addListener(async (id) => {
-  if (id !== NOTE) return;
-  const tab = await findChatGPTTab();
+  if (!id.startsWith('one-voice-')) return;
+  const { ownTabId } = await chrome.storage.session.get('ownTabId');
+  const tab = ownTabId && await chrome.tabs.get(ownTabId).catch(() => null);
   if (tab) bringToFront(tab);
 });
 
@@ -139,23 +153,15 @@ chrome.commands.onCommand.addListener((command) => {
 });
 
 async function onHotkey(mode) {
-  const tab = await findChatGPTTab();
-  if (!tab) {
-    // Chrome lets only Web Store extensions launch an installed web app, so say so instead of
-    // opening a separate window.
-    notify('ChatGPT app is closed', 'Open it (its shelf icon, or Alt + its shelf number), then press the key again.',
-      { autoClose: 8000, force: true });
-    report('ChatGPT app is closed');
-    return;
-  }
+  const { tab, fresh } = await ownChatGPTTab();
+  if (fresh) notify('Opening ChatGPT…', 'In a minimized window of its own; recording starts when it has loaded.', { timer: true });
   // Left as it is (minimized works); brought forward only if the setting says so.
   if ((await chrome.storage.sync.get({ raiseWindow: false })).raiseWindow) await bringToFront(tab);
-  // Memory Saver must not unload a ChatGPT app that stays minimized.
-  if (tab.autoDiscardable !== false) chrome.tabs.update(tab.id, { autoDiscardable: false }).catch(() => {});
 
-  const status = await ask(tab.id, { type: 'status' }, 3000);
+  const status = await ask(tab.id, { type: 'status' }, fresh ? 30000 : 3000);
   if (!status) {
-    report('ChatGPT page did not answer', tab.url || tab.pendingUrl || '');
+    report('ChatGPT page did not answer');
+    notify('Nothing happened', 'The ChatGPT page did not load or answer. Press again.', { autoClose: 12000 });
     return;
   }
 
@@ -164,9 +170,8 @@ async function onHotkey(mode) {
     const [, res] = await Promise.all([pauseMediaTabs(), ask(tab.id, { type: 'start', mode })]);
     stopPacer();
     if (res && res.ok) noteRecording();
-    else await resumeMediaTabs();
+    else await resumeMediaTabs();  // the content script's 'done' message tells what failed
   } else if (status.state === 'recording') {
-    stopTick();
     resumeMediaTabs();
     startPacer(tab.id);
     await ask(tab.id, { type: 'stop', mode });
@@ -283,8 +288,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'progress') {
     stopTick();
     if (sender.tab && !pacer) startPacer(sender.tab.id);  // auto-stop at max duration
-    if (msg.step === 'transcribing') notify('Transcribing…', 'Your words go to the clipboard first.', { sticky: true });
-    if (msg.step === 'answer') notify('Waiting for the GPT answer…', 'Your words are already in the clipboard.', { sticky: true });
+    if (msg.step === 'transcribing') notify('Transcribing…', 'Your words go to the clipboard first.', { timer: true });
+    if (msg.step === 'answer') notify('GPT is writing the answer…', 'Your words are already in the clipboard.', { timer: true });
   }
   if (msg.type === 'done') {
     stopPacer();

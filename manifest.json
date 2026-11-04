@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ONE voice (ChatGPT)",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Hotkey voice-to-text via ChatGPT dictation. Plain: your words to the clipboard. Grammar: your @grammar GPT's whole answer to the clipboard.",
   "minimum_chrome_version": "116",
   "permissions": [
