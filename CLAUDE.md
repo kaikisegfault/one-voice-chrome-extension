@@ -15,6 +15,7 @@ MV3 extension, no build step. User-facing behaviour is in `README.md`.
 
 - ChatGPT controls are found by labels/text, never by CSS classes. When a step can't match, `report()` stores what it saw (buttons / HTML) as `lastIssue`; the owner sends **Copy details** from the popup.
 - No `"global": true` on commands: ChromeOS hides and ignores global extension shortcuts, and a command marked global never fires there, not even inside Chrome.
+- Recording: `startSegment` clicks the mic and must see ■ within 6 s (learned as `S.stopRef`) before the start counts. Stop clicks that ■ (`presentStop`), retries once if it stays. A background `watch` every 2 s detects ChatGPT ending the recording itself → `rollOver` saves/copies the piece and starts a new segment; `S.parts` are joined at the end. A stop with no ■ still waits for the words in the input.
 - Raw transcript is always copied before any GPT step.
 - Never store the owner's words or answers (storage, logs, `lastIssue`); copy text only in memory on its way to the clipboard.
 - ChatGPT's markup has no stable `data-testid` / message-role attributes (late 2026): find things by labels, text and document order only.

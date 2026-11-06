@@ -21,6 +21,12 @@
     startedAt: 0,
     maxTimer: null,
     result: null,       // what the clipboard got: { kind: 'words' | 'answer', chars }
+    stopRef: null,      // the ■ of the current recording, learned right after it appeared: { el, sig }
+    missing: 0,         // watch checks in a row without that ■
+    parts: [],          // transcribed pieces when ChatGPT ended a long recording on its own
+    baseText: '',       // input text before the piece being transcribed now
+    segStartedAt: 0,
+    pendingStop: null,  // stop key pressed while a piece was being saved
     scope: null,        // composer area, kept from before recording (the input is swapped out while recording)
     idleSigs: new Set(), // buttons there before recording
     trailing: null,     // rect of the send / voice button at the far right, never the stop button
@@ -131,7 +137,7 @@
   }
 
   // The ■ button: not cancel, not send, not at the send button's spot; labelled stop/done or new since
-  // recording started; the rightmost wins (✕ is at the left end).
+  // recording started. Position decides: the rightmost wins, since ✕ is at the left end of the bar.
   function findStop() {
     const inScope = S.scope && S.scope.isConnected && S.scope !== document;
     const scope = inScope ? S.scope : composerScope();
@@ -147,7 +153,7 @@
       if (inScope && !S.idleSigs.has(buttonSig(btn))) score += 5;
       if (score) ranked.push({ btn, score, right: r.right, sig: buttonSig(btn) });
     }
-    ranked.sort((a, b) => b.score - a.score || b.right - a.right);
+    ranked.sort((a, b) => b.right - a.right);
     if (!ranked.length) return null;
     console.log(LOG, 'stop →', ranked[0].sig);
     return ranked[0].btn;
@@ -501,25 +507,58 @@
     } catch (e) {}
   }
 
-  async function waitForTranscript(run, recordedSec) {
-    const end = Date.now() + Math.min(90000, 20000 + recordedSec * 100);
+  // The ■ we learned at start: the same element, or one with the same label and icon if ChatGPT redrew it.
+  function presentStop() {
+    const ref = S.stopRef;
+    if (!ref) return null;
+    if (ref.el && visible(ref.el)) return ref.el;
+    const scope = S.scope && S.scope.isConnected ? S.scope : document;
+    const again = Array.from(scope.querySelectorAll('button')).find(b => visible(b) && buttonSig(b) === ref.sig);
+    if (again) ref.el = again;
+    return again || null;
+  }
+
+  const recordingButtons = () => describeButtons(S.scope && S.scope.isConnected ? S.scope : document);
+
+  // Click the mic, then confirm the recording bar is there and learn its ■ before saying "Recording".
+  async function startSegment(run) {
+    const mic = await waitFor(findMic, 20000, 200, run);  // a freshly opened window is still loading
+    if (!mic) throw fail('mic button not found', describeButtons(composerScope()));
+    rememberIdleLayout();
+    await realisticClick(mic);
+    const btn = await waitFor(findStop, 6000, 100, run);
+    if (!btn) throw fail('recording did not start: ChatGPT showed no stop button', recordingButtons());
+    S.stopRef = { el: btn, sig: buttonSig(btn) };
+    S.missing = 0;
+    S.segStartedAt = Date.now();
+    S.state = 'recording';
+  }
+
+  // Waits for the newest piece of transcription to land in the input (after S.baseText).
+  async function waitForPiece(run, recordedSec) {
+    const end = Date.now() + Math.min(300000, 30000 + recordedSec * 250);
     let last = null;
     let stable = 0;
     while (Date.now() < end) {
       await sleep(150);
       check(run);
       const now = composerText();
-      if (!now || now === S.preText || now.length <= S.preText.length) continue;
-      const cand = (now.startsWith(S.preText) ? now.slice(S.preText.length) : now).trim();
+      if (!now.trim() || now === S.baseText) continue;
+      const cand = (now.startsWith(S.baseText) ? now.slice(S.baseText.length) : now).trim();
       if (cand && cand === last) {
-        if (++stable >= 2) return cand;
+        if (++stable >= 2) {
+          S.baseText = now;
+          return cand;
+        }
       } else {
         last = cand;
         stable = 0;
       }
     }
-    throw fail('no transcription arrived in the input', describeButtons(S.scope && S.scope.isConnected ? S.scope : document));
+    throw fail('no transcription arrived in the input', recordingButtons());
   }
+
+  const allWords = () => S.parts.join(' ').replace(/\s+/g, ' ').trim();
 
   function finish(run, err) {
     if (err instanceof Cancelled || run !== S.run) return;
@@ -535,14 +574,13 @@
     S.mode = mode;
     try {
       await loadConfig();
-      const mic = await waitFor(findMic, 20000, 200, run);  // a freshly opened window is still loading
-      if (!mic) throw fail('mic button not found', describeButtons(composerScope()));
-      S.preText = composerText();
-      rememberIdleLayout();
-      await realisticClick(mic);
-      check(run);
-      S.state = 'recording';
+      S.preText = S.baseText = composerText();
+      S.parts = [];
+      S.pendingStop = null;
+      S.result = null;
       S.startedAt = Date.now();
+      await startSegment(run);
+      check(run);
       S.maxTimer = setTimeout(() => {
         console.log(LOG, 'max duration reached, auto-stopping');
         stop(S.mode, run);
@@ -554,32 +592,73 @@
     }
   }
 
+  // Your words (all pieces) to the clipboard, then for grammar the GPT's answer.
+  async function deliver(mode, run) {
+    const text = allWords();
+    const copied = await copy(text);
+    if (copied) S.result = { kind: 'words', chars: text.length };
+    if (mode === 'plain') {
+      const composer = findComposer();
+      if (copied && composer) clearComposer(composer);
+    } else {
+      const answer = await askGPT(text, run);
+      if (answer && await copy(answer)) S.result = { kind: 'answer', chars: answer.length };
+    }
+  }
+
   async function stop(mode, run = S.run) {
+    if (S.state === 'rolling') { S.pendingStop = mode; return; }  // a piece is being saved: stop right after
     if (S.state !== 'recording' || run !== S.run) return;
     clearTimeout(S.maxTimer);
     S.state = 'processing';
-    S.result = null;
     try {
-      const stopBtn = await waitFor(findStop, 1500, 100, run);
-      if (!stopBtn) {
-        throw fail('stop button not found (or ChatGPT cancelled the recording)',
-          describeButtons(S.scope && S.scope.isConnected ? S.scope : document));
+      const btn = presentStop() || findStop();
+      if (btn) {
+        await realisticClick(btn);
+        // Make sure it took: the ■ goes away. If not, press it once more.
+        if (!(await waitFor(() => !presentStop(), 3000, 100, run)) && presentStop()) await realisticClick(presentStop());
       }
-      await realisticClick(stopBtn);
+      // No ■ means ChatGPT had already ended the recording; its words may still be arriving.
       send('progress', { step: 'transcribing' });
-      const text = await waitForTranscript(run, (Date.now() - S.startedAt) / 1000);
-
-      // Raw text first, so a failed GPT step still leaves you the dictation.
-      const copied = await copy(text);
-      if (copied) S.result = { kind: 'words', chars: text.length };
-      if (mode === 'plain') {
-        const composer = findComposer();
-        if (copied && composer) clearComposer(composer);
-      } else {
-        const answer = await askGPT(text, run);
-        if (answer && await copy(answer)) S.result = { kind: 'answer', chars: answer.length };
-      }
+      S.parts.push(await waitForPiece(run, (Date.now() - S.segStartedAt) / 1000));
+      await deliver(mode, run);
       finish(run);
+    } catch (e) {
+      finish(run, e);
+    }
+  }
+
+  // Checked every 2 s by the background while recording. If ChatGPT ends the recording on its own
+  // (it does for long ones), save what it transcribed, copy it, and record on.
+  function watch() {
+    if (S.state !== 'recording') return;
+    if (presentStop()) { S.missing = 0; return; }
+    if (++S.missing >= 2) rollOver(S.run);
+  }
+
+  async function rollOver(run) {
+    S.state = 'rolling';
+    send('progress', { step: 'ended', at: Date.now() - S.startedAt });
+    try {
+      S.parts.push(await waitForPiece(run, (Date.now() - S.segStartedAt) / 1000));
+      const text = allWords();
+      if (await copy(text)) S.result = { kind: 'words', chars: text.length };
+      if (!S.pendingStop) {
+        await startSegment(run);
+        send('progress', { step: 'resumed', parts: S.parts.length, chars: text.length });
+      }
+      if (S.pendingStop) {
+        const mode = S.pendingStop;
+        S.pendingStop = null;
+        clearTimeout(S.maxTimer);
+        S.state = 'processing';
+        if (presentStop()) {  // recording again already: stop that piece the normal way
+          S.state = 'recording';
+          return stop(mode, run);
+        }
+        await deliver(mode, run);
+        finish(run);
+      }
     } catch (e) {
       finish(run, e);
     }
@@ -598,6 +677,10 @@
     switch (msg.type) {
       case 'status':
         sendResponse({ state: S.state });
+        return;
+      case 'watch':
+        watch();
+        sendResponse({});
         return;
       case 'tick':
         for (const wake of Array.from(sleepers)) wake();

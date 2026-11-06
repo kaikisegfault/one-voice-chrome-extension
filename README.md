@@ -16,7 +16,9 @@ Companion to [`kaikisegfault/one-voice`](https://github.com/kaikisegfault/one-vo
 - Pressing a key while it's waiting for the answer cancels.
 - A notification stays up through the whole run, one per step: **● Recording** (with its timer), **Transcribing…**, **GPT is writing the answer…**, then **✓ Copied** (or what failed). It's visible over every window. Clicking it shows the extension's ChatGPT window.
 - The extension uses a ChatGPT window of its own: opened minimized on the first press (and again if you close it), then left alone. Your own ChatGPT app or tabs are never touched. (Setting **Bring ChatGPT to the front on each press** restores / raises it.)
-- In the recording bar `✕ ~~~ ■ ↑` the stop press clicks **■** (text into the input, nothing sent yet), never ✕ or ↑.
+- **● Recording** appears only once ChatGPT's recording is confirmed and its **■** button (in the bar `✕ ~~~ ■ ↑`) is known. No ● Recording, no recording: don't talk yet. The stop press clicks that same ■ and checks that it took.
+- ChatGPT ends long recordings by itself. The extension checks every 2 s; when that happens it saves and copies the words so far (**⏸ Hold on a moment**), starts recording again within a few seconds, and at the end you get all pieces as one text. If ChatGPT had already ended it when you press stop, the words are still taken from its input.
+- The keys only reach Chrome while a Chrome window has focus (ChromeOS has no global extension shortcuts). Closing other windows never affects the extension's window or a recording; a press made in a Linux app is just ignored — click a Chrome window and press again.
 - The keys work while any Chrome window has focus: browser tabs, the ChatGPT app window, other installed web apps. ChromeOS doesn't offer **Global** extension shortcuts (Chrome hides that scope and ignores it there), so Linux apps such as VS Code can't trigger them. From a Linux app: pin ChatGPT to the shelf and press `Alt+<its shelf position>` to bring it forward, then the mode key.
 - Change keys at `chrome://extensions/shortcuts`.
 

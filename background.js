@@ -57,6 +57,20 @@ function stopPacer() {
   pacer = null;
 }
 
+// While recording, ask the page every 2 s whether ChatGPT's recording is still on (it ends long
+// ones by itself); the page then saves the words and records on. Messages, so it runs minimized too.
+let watcher = null;
+
+function startWatch(tabId) {
+  stopWatch();
+  watcher = setInterval(() => chrome.tabs.sendMessage(tabId, { type: 'watch' }).catch(() => {}), 2000);
+}
+
+function stopWatch() {
+  clearInterval(watcher);
+  watcher = null;
+}
+
 // Message the content script; inject it when nobody answers (tab open from before install or reload).
 // A fresh window gets a few seconds to load first.
 async function ask(tabId, msg, waitMs = 0) {
@@ -104,13 +118,13 @@ function notify(...args) {
   return noteQueue;
 }
 
-async function showNote(title, message, { timer = false, autoClose = 0, force = false } = {}) {
+async function showNote(title, message, { timer = false, since = 0, autoClose = 0, force = false } = {}) {
   stopTick();
   clearTimeout(closeTimer);
   if (!force && !(await chrome.storage.sync.get({ notify: true })).notify) return;
   if (noteId) chrome.notifications.clear(noteId);
   const id = noteId = `one-voice-${++noteSeq}`;
-  const t0 = Date.now();
+  const t0 = since || Date.now();
   const titleNow = () => (timer ? `${title} ${clock(Date.now() - t0)}` : title);
   await chrome.notifications.create(id, {
     type: 'basic', iconUrl: 'icons/icon-128.png', title: titleNow(), message: message || ' ',
@@ -120,9 +134,13 @@ async function showNote(title, message, { timer = false, autoClose = 0, force = 
   if (autoClose) closeTimer = setTimeout(() => chrome.notifications.clear(id), autoClose);
 }
 
-async function noteRecording() {
+let recordingSince = 0;
+
+// The timer counts from the first start, also after ChatGPT ended a long recording and it resumed.
+async function noteRecording(extra) {
   const keys = Object.fromEntries((await chrome.commands.getAll()).map(c => [c.name, c.shortcut || 'its key']));
-  notify('● Recording', `Stop: ${keys['1-plain']} your words · ${keys['2-grammar']} GPT answer`, { timer: true });
+  const stopKeys = `Stop: ${keys['1-plain']} your words · ${keys['2-grammar']} GPT answer`;
+  notify('● Recording', extra ? `${extra} ${stopKeys}` : stopKeys, { timer: true, since: recordingSince });
 }
 
 function noteDone(msg) {
@@ -169,9 +187,15 @@ async function onHotkey(mode) {
     startPacer(tab.id);
     const [, res] = await Promise.all([pauseMediaTabs(), ask(tab.id, { type: 'start', mode })]);
     stopPacer();
-    if (res && res.ok) noteRecording();
-    else await resumeMediaTabs();  // the content script's 'done' message tells what failed
-  } else if (status.state === 'recording') {
+    if (res && res.ok) {
+      recordingSince = Date.now();
+      noteRecording();
+      startWatch(tab.id);
+    } else {
+      await resumeMediaTabs();  // the content script's 'done' message tells what failed
+    }
+  } else if (status.state === 'recording' || status.state === 'rolling') {
+    stopWatch();
     resumeMediaTabs();
     startPacer(tab.id);
     await ask(tab.id, { type: 'stop', mode });
@@ -287,12 +311,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === 'progress') {
     stopTick();
-    if (sender.tab && !pacer) startPacer(sender.tab.id);  // auto-stop at max duration
+    if (msg.step === 'resumed') {
+      stopPacer();
+      if (sender.tab) startWatch(sender.tab.id);
+      noteRecording(`Go on. ${msg.parts} piece(s) saved and copied (${msg.chars} characters).`);
+      return;
+    }
+    stopWatch();
+    if (sender.tab && !pacer) startPacer(sender.tab.id);  // auto-stop at max duration, or ChatGPT ended it
+    if (msg.step === 'ended') notify('⏸ Hold on a moment', `ChatGPT ended its recording at ${clock(msg.at || 0)}. Saving your words; recording resumes in a few seconds.`);
     if (msg.step === 'transcribing') notify('Transcribing…', 'Your words go to the clipboard first.');
     if (msg.step === 'answer') notify('GPT is writing the answer…', 'Your words are already in the clipboard.');
   }
   if (msg.type === 'done') {
     stopPacer();
+    stopWatch();
     resumeMediaTabs();
     noteDone(msg);
   }
